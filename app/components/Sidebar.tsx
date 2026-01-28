@@ -67,23 +67,34 @@ export default function Sidebar() {
     fetchUser();
   }, []);
 
-  // --- LOGIC LOGOUT ---
+// --- LOGIC LOGOUT (OPTIMIZED) ---
   const handleLogout = async () => {
     try {
-      setIsLoggingOut(true); 
+      setIsLoggingOut(true); // Mulai loading UI
+
+      // 1. Hapus session Supabase
+      // Kita pakai await agar session di server benar-benar mati
       await supabase.auth.signOut();
       
+      // 2. Bersihkan penyimpanan lokal browser (PENTING)
       if (typeof window !== 'undefined') {
         localStorage.clear();
         sessionStorage.clear();
+        
+        // Hapus cookie Supabase secara manual (opsional, untuk memastikan bersih total)
+        document.cookie.split(";").forEach((c) => { 
+          document.cookie = c.replace(/^ +/, "").replace(/=.*/, "=;expires=" + new Date().toUTCString() + ";path=/"); 
+        });
       }
 
-      router.replace('/login');
-      router.refresh(); 
+      // 3. HARD RELOAD ke halaman Login
+      // Ini jauh lebih cepat daripada router.replace() + router.refresh()
+      window.location.href = '/login'; 
       
     } catch (error) {
       console.error("Logout error:", error);
-      setIsLoggingOut(false);
+      // Fallback jika error, tetap paksa keluar
+      window.location.href = '/login';
     }
   };
 
