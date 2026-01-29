@@ -39,23 +39,21 @@ export default function PerformanceDashboard() {
       // 3. Get Reviews
       const { data: reviews } = await supabase.from('performance_reviews').select('normalized_score').eq('cycle_id', cycle.id);
       
-      // --- PERBAIKAN 1: EXCLUDE NILAI 0 ---
-      // Kita filter dulu. Hanya yang > 0 yang dianggap "Sudah Dinilai".
+      // Exclude nilai 0
       const validReviews = reviews?.filter(r => r.normalized_score > 0) || [];
       
-      const count = validReviews.length; // Jumlah yang sudah dinilai
+      const count = validReviews.length;
       
-      // Hitung Rata-rata (Hanya dari yang valid)
+      // Hitung Rata-rata
       const totalScore = validReviews.reduce((acc, curr) => acc + curr.normalized_score, 0);
       const avg = count > 0 ? (totalScore / count).toFixed(1) : 0;
 
       setStats({ 
           totalEmployees: totalEmp || 0, 
-          reviewedCount: count, // Ini akan dipakai di Progress Bar
+          reviewedCount: count,
           avgScore: Number(avg) 
       });
 
-      // Proses Grafik hanya menggunakan data valid (nilai 0 tidak masuk grafik)
       processDistribution(validReviews);
     } else {
         setStats({ totalEmployees: totalEmp || 0, reviewedCount: 0, avgScore: 0 });
@@ -63,17 +61,15 @@ export default function PerformanceDashboard() {
     setLoading(false);
   };
 
-  // --- PERBAIKAN 2: GANTI LABEL "IMPROVEMENT" JADI "POOR" ---
   const getCategory = (score: number) => {
       if (score >= 91) return 'Outstanding';
       if (score >= 76) return 'Exceed';
       if (score >= 60) return 'Meet';
       if (score >= 41) return 'Under';
-      return 'Poor'; // Label baru untuk skor 1 - 40
+      return 'Poor';
   };
 
   const processDistribution = (reviews: any[]) => {
-      // Inisialisasi counter dengan label baru 'Poor'
       const counts: Record<string, number> = { 'Outstanding': 0, 'Exceed': 0, 'Meet': 0, 'Under': 0, 'Poor': 0 };
       
       reviews.forEach(r => {
@@ -81,13 +77,12 @@ export default function PerformanceDashboard() {
           if (counts[cat] !== undefined) counts[cat]++;
       });
 
-      // Update Data Grafik dengan label & warna baru
       const data = [
           { name: 'Outstanding', count: counts['Outstanding'], color: '#7c3aed' }, // Purple
           { name: 'Exceed', count: counts['Exceed'], color: '#10b981' },      // Emerald
           { name: 'Meet', count: counts['Meet'], color: '#3b82f6' },        // Blue
           { name: 'Under', count: counts['Under'], color: '#f59e0b' },      // Amber
-          { name: 'Poor', count: counts['Poor'], color: '#ef4444' }           // Red (Pengganti Improvement)
+          { name: 'Poor', count: counts['Poor'], color: '#ef4444' }           // Red
       ];
       setDistributionData(data);
   };
@@ -101,7 +96,7 @@ export default function PerformanceDashboard() {
         <p className="text-slate-500">Overview kinerja perusahaan dan progres penilaian.</p>
       </div>
 
-      {/* --- HERO BANNER (LAYOUT BARU) --- */}
+      {/* --- HERO BANNER --- */}
       {activeCycle ? (
           <div className="bg-gradient-to-r from-indigo-600 to-blue-600 rounded-2xl p-6 lg:p-8 text-white shadow-lg flex flex-col md:flex-row justify-between items-center gap-6">
               <div className="flex-1">
@@ -116,7 +111,6 @@ export default function PerformanceDashboard() {
                   </p>
               </div>
               
-              {/* PROGRESS INPUT (Di dalam Banner) */}
               <div className="bg-white/10 p-5 rounded-xl border border-white/10 min-w-[280px] backdrop-blur-sm">
                   <div className="text-xs opacity-80 font-bold uppercase tracking-wider mb-2">Progress Input</div>
                   <div className="text-4xl font-bold mb-2">
@@ -143,13 +137,12 @@ export default function PerformanceDashboard() {
           </div>
       )}
 
-      {/* --- MIDDLE SECTION (STATS & CHART) --- */}
+      {/* --- MIDDLE SECTION --- */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
           
-          {/* LEFT: STATS & QUICK ACTION (3 Kolom) */}
+          {/* LEFT: STATS (4 Kolom) */}
           <div className="lg:col-span-4 space-y-6">
               
-              {/* Card: Company Score */}
               <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-4">
                   <div className="w-14 h-14 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center">
                       <Trophy size={28}/>
@@ -160,7 +153,6 @@ export default function PerformanceDashboard() {
                   </div>
               </div>
 
-              {/* Card: Total Employees */}
               <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-4">
                   <div className="w-14 h-14 bg-slate-50 text-slate-600 rounded-2xl flex items-center justify-center">
                       <Users size={28}/>
@@ -171,7 +163,6 @@ export default function PerformanceDashboard() {
                   </div>
               </div>
 
-              {/* Quick Actions Panel */}
               <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
                   <h4 className="font-bold text-slate-800 mb-4">Quick Actions</h4>
                   <div className="space-y-2">
@@ -197,7 +188,7 @@ export default function PerformanceDashboard() {
               </div>
           </div>
 
-          {/* RIGHT: CHART (9 Kolom - Lebih Lebar) */}
+          {/* RIGHT: CHART (8 Kolom) */}
           <div className="lg:col-span-8 bg-white p-8 rounded-2xl border border-slate-200 shadow-sm flex flex-col min-h-[450px]">
               <div className="mb-8">
                   <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2"><Target size={20}/> Distribusi Kinerja (Bell Curve)</h3>
@@ -209,9 +200,17 @@ export default function PerformanceDashboard() {
                       <div className="h-full flex items-center justify-center text-slate-400">Loading Data...</div>
                   ) : activeCycle && distributionData.length > 0 && stats.reviewedCount > 0 ? (
                       <ResponsiveContainer width="100%" height="100%">
-                          <BarChart data={distributionData} margin={{ top: 20, right: 0, left: -20, bottom: 0 }}>
+                          {/* FIX LAYOUT: Tambah bottom margin agar text tidak kepotong */}
+                          <BarChart data={distributionData} margin={{ top: 20, right: 0, left: -20, bottom: 25 }}>
                               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9"/>
-                              <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fontSize: 12, fill: '#64748b', fontWeight: 600}} dy={15}/>
+                              <XAxis 
+                                dataKey="name" 
+                                axisLine={false} 
+                                tickLine={false} 
+                                tick={{fontSize: 11, fill: '#64748b', fontWeight: 600}} 
+                                dy={10} // Jarak text ke batang
+                                interval={0} // Pastikan semua label muncul
+                              />
                               <YAxis axisLine={false} tickLine={false} tick={{fontSize: 12, fill: '#64748b'}}/>
                               <Tooltip 
                                   cursor={{fill: '#f8fafc'}}

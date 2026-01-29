@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
-import MainLayout from "./components/MainLayout"; // Pastikan import MainLayout, BUKAN Sidebar
+import MainLayout from "@/components/MainLayout"; // Pastikan import MainLayout, BUKAN Sidebar
 
 const inter = Inter({ subsets: ["latin"] });
 

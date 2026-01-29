@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { supabase } from '../../lib/supabaseClient';
+import Papa from 'papaparse'; // Pastikan sudah npm install papaparse @types/papaparse
 import { 
   Search, Mail, Phone, MapPin, Calendar, ChevronRight,
   Trash2, Loader2, Download, Upload, Info, LayoutGrid, List, Filter, ArrowUpDown, Briefcase, Plus, X
@@ -24,9 +25,11 @@ export default function EmployeePage() {
 
   // State Actions
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  
+  // STATE IMPORT (LANGSUNG DI SINI)
   const [isImporting, setIsImporting] = useState(false);
   const [importStats, setImportStats] = useState<{added: number, updated: number, skipped: number} | null>(null);
-  const [allowUpdate, setAllowUpdate] = useState(false);
+  const [allowUpdate, setAllowUpdate] = useState(true); // Default true agar data terupdate
   
   // State Add Manual
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -95,6 +98,7 @@ export default function EmployeePage() {
     setDeletingId(id);
     const { error } = await supabase.from('employees').delete().eq('id', id);
     if (!error) setEmployees(prev => prev.filter(emp => emp.id !== id));
+    else alert("Gagal hapus (Mungkin data masih terhubung ke tabel lain). Cek Console.");
     setDeletingId(null);
   };
 
@@ -120,50 +124,29 @@ export default function EmployeePage() {
       setIsAdding(false);
   };
 
-  // --- EXPORT CSV (SUDAH DIPERBAIKI: FIELD LENGKAP) ---
+  // --- EXPORT CSV ---
   const handleExport = () => {
-    // 1. Definisikan Header Kolom
     const headers = [
         "Full Name", "Email", "Phone", "NIK", 
         "Join Date", "Contract End Date", "Status", "Job Position", "Department",
         "Birth Place", "Birth Date", "Marital Status", "KTP Address", "Domicile Address", "NPWP Number",
-        // Field Tambahan (Emergency & Docs)
         "Emergency Name", "Emergency Relation", "Emergency Phone",
         "Photo URL", "KTP Link", "NPWP Link", "Ijazah Link", "Bank Acc Link"
     ];
 
-    // 2. Mapping Data Karyawan ke Baris CSV
     const csvContent = [
       headers.join(","),
       ...employees.map(e => [
-        `"${e.full_name}"`, 
-        e.email, 
-        `"${e.phone || ''}"`, 
-        `"${e.nik || ''}"`, 
-        e.join_date, 
-        e.contract_end_date, 
-        e.employment_status, 
-        `"${e.job_position || ''}"`, 
-        `"${e.department || ''}"`,
-        `"${e.birth_place || ''}"`, 
-        e.birth_date, 
-        `"${e.marital_status || ''}"`,
-        `"${e.ktp_address || ''}"`, 
-        `"${e.domicile_address || ''}"`, 
-        `"${e.npwp_number || ''}"`,
-        // Mapping Field Tambahan
-        `"${e.emergency_contact_name || ''}"`,
-        `"${e.emergency_contact_relation || ''}"`,
-        `"${e.emergency_contact_phone || ''}"`,
-        e.photo_url || '',
-        e.ktp_url || '',
-        e.npwp_url || '',
-        e.ijazah_url || '',
-        e.bank_account_url || ''
+        `"${e.full_name}"`, e.email, `"${e.phone || ''}"`, `"${e.nik || ''}"`, 
+        e.join_date, e.contract_end_date, e.employment_status, 
+        `"${e.job_position || ''}"`, `"${e.department || ''}"`,
+        `"${e.birth_place || ''}"`, e.birth_date, `"${e.marital_status || ''}"`,
+        `"${e.ktp_address || ''}"`, `"${e.domicile_address || ''}"`, `"${e.npwp_number || ''}"`,
+        `"${e.emergency_contact_name || ''}"`, `"${e.emergency_contact_relation || ''}"`, `"${e.emergency_contact_phone || ''}"`,
+        e.photo_url || '', e.ktp_url || '', e.npwp_url || '', e.ijazah_url || '', e.bank_account_url || ''
       ].join(","))
     ].join("\n");
 
-    // 3. Download Logic
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
@@ -173,55 +156,109 @@ export default function EmployeePage() {
     link.click();
   };
 
-  // --- IMPORT CSV ---
+  // --- SMART IMPORT CSV (INTEGRATED) ---
   const handleImportClick = () => { fileInputRef.current?.click(); };
+
+  // Helper untuk membersihkan BOM dan spasi
+  const cleanKey = (key: string) => key ? key.trim().replace(/^\ufeff/, '') : '';
+
+  // Helper Smart Mapping
+  const getValue = (row: any, keys: string[]) => {
+    const rowKeys = Object.keys(row);
+    for (const searchKey of keys) {
+      const foundKey = rowKeys.find(k => cleanKey(k).toLowerCase() === searchKey.toLowerCase());
+      if (foundKey && row[foundKey]) {
+        return String(row[foundKey]).trim();
+      }
+    }
+    return null;
+  };
+
   const processImport = async (event: any) => {
     const file = event.target.files[0];
     if (!file) return;
-    setIsImporting(true); setImportStats(null);
-    const reader = new FileReader();
-    reader.onload = async (e) => {
-      const text = e.target?.result as string;
-      const rows = text.split('\n').slice(1);
-      const toInsert = []; const toUpdate = []; let skippedCount = 0;
-      const emailToIdMap = new Map();
-      employees.forEach(emp => { if(emp.email) emailToIdMap.set(emp.email.toLowerCase().trim(), emp.id); });
 
-      for (const row of rows) {
-        const cols = row.split(',').map(c => c ? c.replace(/"/g, '').trim() : '');
-        if (cols.length < 2 || !cols[1]) continue; 
-        const email = cols[1].toLowerCase();
-        
-        const valOrNull = (val: string) => {
-          if (!val) return null; const clean = val.trim();
-          const junkValues = ['#N/A', 'N/A', '-', '#REF!', 'nan', 'null'];
-          if (clean === '' || junkValues.includes(clean)) return null;
-          return clean;
-        };
+    // DEBUG: Alert ini HARUS muncul jika tombol diklik
+    alert(`File dipilih: ${file.name}. Memulai proses...`);
+    console.log("📂 File terpilih:", file);
 
-        const empData = {
-          full_name: cols[0], email: cols[1], phone: valOrNull(cols[2]), nik: valOrNull(cols[3]),
-          join_date: valOrNull(cols[4]) || new Date().toISOString().split('T')[0], contract_end_date: valOrNull(cols[5]), 
-          employment_status: valOrNull(cols[6]) || 'Contract', job_position: valOrNull(cols[7]), department: valOrNull(cols[8]),
-          birth_place: valOrNull(cols[9]), birth_date: valOrNull(cols[10]), marital_status: valOrNull(cols[11]),
-          ktp_address: valOrNull(cols[12]), domicile_address: valOrNull(cols[13]), npwp_number: valOrNull(cols[14]), is_active: true
-        };
+    setIsImporting(true); 
+    setImportStats(null);
 
-        if (emailToIdMap.has(email)) {
-            if (allowUpdate) toUpdate.push({ ...empData, id: emailToIdMap.get(email) });
-            else skippedCount++;
-        } else { toInsert.push(empData); }
-      }
+    Papa.parse(file, {
+        header: true,
+        skipEmptyLines: true,
+        complete: async (results: any) => {
+            console.log("📊 Hasil Parse:", results);
+            try {
+                const rawData = results.data;
+                if (!rawData || rawData.length === 0) throw new Error("File CSV kosong.");
 
-      if (toInsert.length > 0) await supabase.from('employees').insert(toInsert);
-      if (toUpdate.length > 0) {
-        const { error } = await supabase.from('employees').upsert(toUpdate);
-        if (error) { console.error("Update Gagal:", error.message); alert("Gagal Update: " + error.message); }
-      }
-      setImportStats({ added: toInsert.length, updated: toUpdate.length, skipped: skippedCount });
-      fetchEmployees(); setIsImporting(false); if (fileInputRef.current) fileInputRef.current.value = ''; 
-    };
-    reader.readAsText(file);
+                const formattedData = rawData.map((row: any, index: number) => {
+                    const fullName = getValue(row, ['Full Name', 'full_name', 'fullName', 'Nama Lengkap']);
+                    const email = getValue(row, ['Email', 'email', 'Alamat Email']);
+                    
+                    if (!fullName || !email) {
+                        console.warn(`Row ${index + 1} skipped: Missing Name/Email`);
+                        return null; 
+                    }
+
+                    return {
+                        full_name: fullName,
+                        email: email,
+                        nik: getValue(row, ['NIK', 'nik']),
+                        phone: getValue(row, ['Phone', 'phone', 'No HP']),
+                        join_date: getValue(row, ['Join Date', 'join_date']) || new Date().toISOString().split('T')[0],
+                        contract_end_date: getValue(row, ['Contract End Date', 'contract_end_date']),
+                        employment_status: getValue(row, ['Employment Status', 'employment_status']) || 'Contract',
+                        job_position: getValue(row, ['Job Position', 'job_position']),
+                        department: getValue(row, ['Department', 'department']),
+                        birth_place: getValue(row, ['Birth Place', 'birth_place']),
+                        birth_date: getValue(row, ['Birth Date', 'birth_date']),
+                        marital_status: getValue(row, ['Marital Status', 'marital_status']),
+                        ktp_address: getValue(row, ['KTP Address', 'ktp_address']),
+                        domicile_address: getValue(row, ['Domicile Address', 'domicile_address']),
+                        npwp_number: getValue(row, ['NPWP Number', 'npwp_number']),
+                        is_active: true,
+                    };
+                }).filter((item: any) => item !== null);
+
+                console.log("🚀 Data siap kirim:", formattedData);
+
+                if (formattedData.length === 0) throw new Error("Tidak ada data valid.");
+
+                // UPSERT ke Supabase (Jika email sama, update data)
+                const { data, error } = await supabase
+                    .from('employees')
+                    .upsert(formattedData, { onConflict: 'email', ignoreDuplicates: !allowUpdate })
+                    .select();
+
+                if (error) throw error;
+
+                // Hitung Statistik Sederhana
+                // (Supabase upsert tidak return detail inserted vs updated secara default, jadi kita asumsi success)
+                setImportStats({ 
+                    added: formattedData.length, 
+                    updated: 0, 
+                    skipped: rawData.length - formattedData.length 
+                });
+                
+                alert(`Sukses! ${formattedData.length} karyawan diproses.`);
+                fetchEmployees();
+
+            } catch (err: any) {
+                console.error("Import Error:", err);
+                alert("Gagal Import: " + err.message);
+            } finally {
+                setIsImporting(false);
+                if (fileInputRef.current) fileInputRef.current.value = ''; 
+            }
+        },
+        error: (err: any) => {
+            alert("Gagal Parsing CSV: " + err.message);
+            setIsImporting(false);
+        }
+    });
   };
 
   return (
@@ -263,6 +300,7 @@ export default function EmployeePage() {
               <span className="text-xs font-bold text-slate-600">Overwrite?</span>
            </label>
 
+           {/* HIDDEN INPUT UTAMA UNTUK IMPORT */}
            <input type="file" ref={fileInputRef} onChange={processImport} className="hidden" accept=".csv"/>
            
            <button onClick={handleImportClick} disabled={isImporting} className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-300 rounded-lg text-sm font-bold text-slate-700 hover:bg-slate-50 transition-colors w-full sm:w-auto justify-center">
@@ -282,9 +320,8 @@ export default function EmployeePage() {
             <div className="flex-1">
                 <h4 className="font-bold text-slate-800 text-sm">Proses Import Selesai</h4>
                 <p className="text-xs text-slate-500 mt-1">
-                    <span className="font-bold text-emerald-600">{importStats.added} Baru</span> • 
-                    <span className="font-bold text-blue-600 ml-1">{importStats.updated} Diupdate</span> • 
-                    <span className="font-bold text-slate-400 ml-1">{importStats.skipped} Dilewati</span>
+                    <span className="font-bold text-emerald-600">{importStats.added} Data Diproses</span> • 
+                    <span className="font-bold text-slate-400 ml-1">{importStats.skipped} Dilewati (Error/Kosong)</span>
                 </p>
             </div>
             <button onClick={() => setImportStats(null)} className="text-xs font-bold text-slate-400 hover:text-slate-600">Tutup</button>
@@ -384,65 +421,65 @@ export default function EmployeePage() {
                 <table className="w-full text-left text-sm border-collapse">
                    <thead className="bg-slate-50 border-b border-slate-200">
                       <tr>
-                         <th className="px-6 py-4 font-semibold text-slate-500 w-12 text-center">No</th>
-                         <th className="px-6 py-4 font-semibold text-slate-700 cursor-pointer hover:bg-slate-100" onClick={() => requestSort('full_name')}>
-                             <div className="flex items-center gap-1">Employee {sortConfig.key === 'full_name' && <ArrowUpDown size={14} className="text-indigo-500"/>}</div>
-                         </th>
-                         <th className="px-6 py-4 font-semibold text-slate-700 cursor-pointer hover:bg-slate-100" onClick={() => requestSort('job_position')}>
-                             <div className="flex items-center gap-1">Role / Dept {sortConfig.key === 'job_position' && <ArrowUpDown size={14} className="text-indigo-500"/>}</div>
-                         </th>
-                         <th className="px-6 py-4 font-semibold text-slate-700">Status</th>
-                         <th className="px-6 py-4 font-semibold text-slate-700 cursor-pointer hover:bg-slate-100" onClick={() => requestSort('created_at')}>
-                             <div className="flex items-center gap-1">Input Date {sortConfig.key === 'created_at' && <ArrowUpDown size={14} className="text-indigo-500"/>}</div>
-                         </th>
-                         <th className="px-6 py-4 font-semibold text-slate-700">Contact</th>
-                         <th className="px-6 py-4 text-right">Action</th>
+                          <th className="px-6 py-4 font-semibold text-slate-500 w-12 text-center">No</th>
+                          <th className="px-6 py-4 font-semibold text-slate-700 cursor-pointer hover:bg-slate-100" onClick={() => requestSort('full_name')}>
+                              <div className="flex items-center gap-1">Employee {sortConfig.key === 'full_name' && <ArrowUpDown size={14} className="text-indigo-500"/>}</div>
+                          </th>
+                          <th className="px-6 py-4 font-semibold text-slate-700 cursor-pointer hover:bg-slate-100" onClick={() => requestSort('job_position')}>
+                              <div className="flex items-center gap-1">Role / Dept {sortConfig.key === 'job_position' && <ArrowUpDown size={14} className="text-indigo-500"/>}</div>
+                          </th>
+                          <th className="px-6 py-4 font-semibold text-slate-700">Status</th>
+                          <th className="px-6 py-4 font-semibold text-slate-700 cursor-pointer hover:bg-slate-100" onClick={() => requestSort('created_at')}>
+                              <div className="flex items-center gap-1">Input Date {sortConfig.key === 'created_at' && <ArrowUpDown size={14} className="text-indigo-500"/>}</div>
+                          </th>
+                          <th className="px-6 py-4 font-semibold text-slate-700">Contact</th>
+                          <th className="px-6 py-4 text-right">Action</th>
                       </tr>
                    </thead>
                    <tbody className="divide-y divide-slate-100">
                       {processedEmployees.map((emp, index) => (
-                         <tr key={emp.id} className="group hover:bg-indigo-50/30 transition-colors">
-                            <td className="px-6 py-4 text-center text-slate-400 font-mono text-xs">{index + 1}</td>
-                            <td className="px-6 py-4">
-                                <div className="flex items-center gap-3">
-                                    <div className="w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 font-bold text-sm overflow-hidden">
-                                        {emp.photo_url ? <img src={emp.photo_url} alt="" className="w-full h-full object-cover"/> : emp.full_name.charAt(0)}
-                                    </div>
-                                    <div>
-                                        <div className="font-bold text-slate-900">{emp.full_name}</div>
-                                        <div className="text-xs text-slate-500 font-mono">{emp.nik || 'No NIK'}</div>
-                                    </div>
-                                </div>
-                            </td>
-                            <td className="px-6 py-4">
-                                <div className="font-medium text-slate-700">{emp.job_position || '-'}</div>
-                                <div className="text-xs text-slate-500">{emp.department || '-'}</div>
-                            </td>
-                            <td className="px-6 py-4">
-                                <span className={`px-2.5 py-1 rounded-full text-xs font-bold border ${
-                                    emp.employment_status === 'Permanent' ? 'bg-emerald-50 text-emerald-700 border-emerald-100' :
-                                    emp.employment_status === 'Contract' ? 'bg-blue-50 text-blue-700 border-blue-100' :
-                                    'bg-slate-50 text-slate-600 border-slate-200'
-                                }`}>{emp.employment_status}</span>
-                            </td>
-                            <td className="px-6 py-4 text-slate-600 text-xs font-mono">
-                                {new Date(emp.created_at).toLocaleDateString()}
-                            </td>
-                            <td className="px-6 py-4 text-xs text-slate-500 space-y-1">
-                                <div className="flex items-center gap-1.5"><Mail size={12}/> {emp.email}</div>
-                                <div className="flex items-center gap-1.5"><Phone size={12}/> {emp.phone || '-'}</div>
-                            </td>
-                            <td className="px-6 py-4 text-right">
-                                <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                    <Link href={`/employees/${emp.id}`} className="p-1.5 rounded-lg bg-indigo-50 text-indigo-600 hover:bg-indigo-100" title="View Profile">
-                                        <ChevronRight size={16}/>
-                                    </Link>
-                                    <button onClick={() => handleDelete(emp.id, emp.full_name)} className="p-1.5 rounded-lg bg-red-50 text-red-600 hover:bg-red-100" title="Delete">
-                                        <Trash2 size={16}/>
-                                    </button>
-                                </div>
-                            </td>
-                         </tr>
+                          <tr key={emp.id} className="group hover:bg-indigo-50/30 transition-colors">
+                             <td className="px-6 py-4 text-center text-slate-400 font-mono text-xs">{index + 1}</td>
+                             <td className="px-6 py-4">
+                                 <div className="flex items-center gap-3">
+                                     <div className="w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 font-bold text-sm overflow-hidden">
+                                         {emp.photo_url ? <img src={emp.photo_url} alt="" className="w-full h-full object-cover"/> : emp.full_name.charAt(0)}
+                                     </div>
+                                     <div>
+                                         <div className="font-bold text-slate-900">{emp.full_name}</div>
+                                         <div className="text-xs text-slate-500 font-mono">{emp.nik || 'No NIK'}</div>
+                                     </div>
+                                 </div>
+                             </td>
+                             <td className="px-6 py-4">
+                                 <div className="font-medium text-slate-700">{emp.job_position || '-'}</div>
+                                 <div className="text-xs text-slate-500">{emp.department || '-'}</div>
+                             </td>
+                             <td className="px-6 py-4">
+                                 <span className={`px-2.5 py-1 rounded-full text-xs font-bold border ${
+                                     emp.employment_status === 'Permanent' ? 'bg-emerald-50 text-emerald-700 border-emerald-100' :
+                                     emp.employment_status === 'Contract' ? 'bg-blue-50 text-blue-700 border-blue-100' :
+                                     'bg-slate-50 text-slate-600 border-slate-200'
+                                 }`}>{emp.employment_status}</span>
+                             </td>
+                             <td className="px-6 py-4 text-slate-600 text-xs font-mono">
+                                 {new Date(emp.created_at).toLocaleDateString()}
+                             </td>
+                             <td className="px-6 py-4 text-xs text-slate-500 space-y-1">
+                                 <div className="flex items-center gap-1.5"><Mail size={12}/> {emp.email}</div>
+                                 <div className="flex items-center gap-1.5"><Phone size={12}/> {emp.phone || '-'}</div>
+                             </td>
+                             <td className="px-6 py-4 text-right">
+                                 <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                     <Link href={`/employees/${emp.id}`} className="p-1.5 rounded-lg bg-indigo-50 text-indigo-600 hover:bg-indigo-100" title="View Profile">
+                                         <ChevronRight size={16}/>
+                                     </Link>
+                                     <button onClick={() => handleDelete(emp.id, emp.full_name)} className="p-1.5 rounded-lg bg-red-50 text-red-600 hover:bg-red-100" title="Delete">
+                                         <Trash2 size={16}/>
+                                     </button>
+                                 </div>
+                             </td>
+                          </tr>
                       ))}
                    </tbody>
                 </table>
@@ -481,6 +518,7 @@ export default function EmployeePage() {
               </div>
           </div>
       )}
+
     </div>
   );
 }

@@ -16,7 +16,7 @@ export default function PerformanceResultsPage() {
       direction: 'desc' 
   });
 
-  // 1. LOAD PREFERENCE FROM LOCAL STORAGE (SAAT PAGE LOAD)
+  // 1. LOAD PREFERENCE FROM LOCAL STORAGE
   useEffect(() => {
       const savedSort = localStorage.getItem('performance_sort_config');
       if (savedSort) {
@@ -53,6 +53,9 @@ export default function PerformanceResultsPage() {
     setLoading(false);
   };
 
+  // --- LOGIKA WARNA & KATEGORI (DISINKRONKAN) ---
+  
+  // Logic 1: Label Kategori
   const getCategoryLabel = (score: number) => {
       if (score >= 91) return { label: 'Outstanding', color: 'bg-purple-100 text-purple-700 border-purple-200' };
       if (score >= 76) return { label: 'Exceed Expectation', color: 'bg-emerald-100 text-emerald-700 border-emerald-200' };
@@ -61,17 +64,18 @@ export default function PerformanceResultsPage() {
       return { label: 'Need Improvement', color: 'bg-red-50 text-red-700 border-red-200' };
   };
 
+  // Logic 2: Warna Score (Harus SAMA PERSIS threshold-nya dengan Logic 1)
   const getScoreColor = (score: number) => {
-    if (score >= 85) return 'text-emerald-600 bg-emerald-50 border-emerald-100';
-    if (score >= 70) return 'text-blue-600 bg-blue-50 border-blue-100';
-    if (score >= 60) return 'text-amber-600 bg-amber-50 border-amber-100';
-    return 'text-red-600 bg-red-50 border-red-100';
+    if (score >= 91) return 'text-purple-700 bg-purple-50 border-purple-200'; // Outstanding (Ungu)
+    if (score >= 76) return 'text-emerald-700 bg-emerald-50 border-emerald-200'; // Exceed (Hijau)
+    if (score >= 60) return 'text-blue-700 bg-blue-50 border-blue-200'; // Meet (Biru)
+    if (score >= 41) return 'text-amber-700 bg-amber-50 border-amber-200'; // Under (Kuning/Amber)
+    return 'text-red-700 bg-red-50 border-red-200'; // Poor (Merah)
   };
 
   // 2. HANDLE SORT & SAVE TO LOCAL STORAGE
   const handleSort = (key: string) => {
       let direction: 'asc' | 'desc' = 'asc';
-      // Jika klik kolom yang sama, toggle arahnya
       if (sortConfig.key === key && sortConfig.direction === 'asc') {
           direction = 'desc';
       }
@@ -79,7 +83,6 @@ export default function PerformanceResultsPage() {
       const newConfig = { key, direction };
       setSortConfig(newConfig);
       
-      // SIMPAN KE BROWSER
       localStorage.setItem('performance_sort_config', JSON.stringify(newConfig));
   };
 
@@ -91,8 +94,8 @@ export default function PerformanceResultsPage() {
     )
     .sort((a, b) => {
         if (sortConfig.key === 'name') {
-            const nameA = a.employee.full_name.toLowerCase();
-            const nameB = b.employee.full_name.toLowerCase();
+            const nameA = a.employee?.full_name?.toLowerCase() || '';
+            const nameB = b.employee?.full_name?.toLowerCase() || '';
             return sortConfig.direction === 'asc' ? nameA.localeCompare(nameB) : nameB.localeCompare(nameA);
         }
         if (sortConfig.key === 'score') {
@@ -165,10 +168,15 @@ export default function PerformanceResultsPage() {
                                     <span className="px-2 py-1 bg-slate-100 rounded text-xs font-medium text-slate-600 border border-slate-200">{r.cycle?.title}</span>
                                 </td>
                                 <td className="px-6 py-4 text-center">
-                                    <span className={`px-3 py-1 rounded-full text-xs font-bold border ${getScoreColor(r.normalized_score)}`}>{r.normalized_score}</span>
+                                    {/* Gunakan getScoreColor yang sudah diperbaiki */}
+                                    <span className={`px-3 py-1 rounded-full text-xs font-bold border ${getScoreColor(r.normalized_score)}`}>
+                                        {r.normalized_score}
+                                    </span>
                                 </td>
                                 <td className="px-6 py-4 text-center">
-                                    <span className={`px-2 py-1 rounded text-[10px] font-bold uppercase border ${cat.color}`}>{cat.label}</span>
+                                    <span className={`px-2 py-1 rounded text-[10px] font-bold uppercase border ${cat.color}`}>
+                                        {cat.label}
+                                    </span>
                                 </td>
                                 <td className="px-6 py-4 text-right">
                                     <div className="flex items-center justify-end gap-2">
