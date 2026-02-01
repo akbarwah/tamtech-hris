@@ -5,6 +5,7 @@ import { supabase } from '../../../lib/supabaseClient';
 import { ArrowLeft, Calculator, Loader2, Save, Download, Upload, FileText } from 'lucide-react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
+import { toast } from 'sonner'; // 1. IMPORT TOAST
 
 // --- HELPER: SMART CSV PARSER (IMPORT) ---
 const parseCSVLine = (text: string) => {
@@ -22,13 +23,11 @@ const parseCSVLine = (text: string) => {
 };
 
 // --- HELPER: SAFE CSV STRINGIFIER (EXPORT) ---
-// Memastikan teks yang mengandung koma/enter diapit tanda kutip agar Excel tidak error
 const safeCsv = (value: any) => {
     if (value === null || value === undefined) return '';
     const stringValue = String(value);
-    // Jika ada koma, kutip, atau baris baru, bungkus dengan kutip dua
     if (stringValue.includes(',') || stringValue.includes('"') || stringValue.includes('\n')) {
-        return `"${stringValue.replace(/"/g, '""')}"`; // Escape double quotes
+        return `"${stringValue.replace(/"/g, '""')}"`; 
     }
     return stringValue;
 };
@@ -53,7 +52,7 @@ function AdminInputContent() {
   
   const [saving, setSaving] = useState(false);
   const [isProcessingCsv, setIsProcessingCsv] = useState(false);
-  const [isExporting, setIsExporting] = useState(false); // State Loading untuk Export
+  const [isExporting, setIsExporting] = useState(false); 
 
   useEffect(() => {
     const init = async () => {
@@ -97,16 +96,18 @@ function AdminInputContent() {
 
   // --- LOGIC 1: EXPORT CSV WITH DATA (UPDATED) ---
   const handleDownloadTemplate = async () => {
-      if(!selectedCycleId) return alert("Pilih Periode dulu!");
+      if(!selectedCycleId) {
+          toast.warning("Pilih Periode terlebih dahulu!");
+          return;
+      }
       setIsExporting(true);
+      toast.info("Sedang mengekspor data...");
 
       try {
-        // 1. Fetch Data Existing (Header & Scores) untuk Cycle ini
         const { data: reviews } = await supabase.from('performance_reviews')
             .select('id, employee_id, summary_strength, summary_areas_of_improvement')
             .eq('cycle_id', selectedCycleId);
         
-        // Buat Map Review untuk akses cepat
         const reviewMap: Record<string, any> = {};
         const reviewIds: number[] = [];
         
@@ -117,8 +118,7 @@ function AdminInputContent() {
             });
         }
 
-        // 2. Fetch Detail Scores jika ada review
-        const scoreMap: Record<string, any> = {}; // Format: { reviewId_indicatorId: { self: 4, peer: 5... } }
+        const scoreMap: Record<string, any> = {}; 
         
         if (reviewIds.length > 0) {
             const { data: scores } = await supabase.from('review_scores')
@@ -134,22 +134,16 @@ function AdminInputContent() {
             }
         }
 
-        // 3. Generate CSV Rows
         const rows = [['Employee_Name', 'Indicator_Code', 'Indicator_Name', 'Self_Score', 'Peer_Score', 'Supervisor_Score', 'Subordinate_Score', 'Strength_Narrative', 'Improvement_Narrative']];
         
         employees.forEach(emp => {
-            // Ambil data review karyawan ini (jika ada)
             const review = reviewMap[emp.id];
-            
-            // Narasi hanya kita taruh di baris pertama (indikator pertama) agar rapi di Excel
-            // Tapi kita simpan di variabel dulu
             const strStrength = review ? review.summary_strength : '';
             const strImprove = review ? review.summary_areas_of_improvement : '';
 
             indicators.forEach((ind, index) => {
                 let self = '', peer = '', superv = '', subord = '';
 
-                // Jika ada review, ambil skornya
                 if (review) {
                     const key = `${review.id}_${ind.id}`;
                     const s = scoreMap[key];
@@ -161,7 +155,6 @@ function AdminInputContent() {
                     }
                 }
 
-                // Logic: Narasi hanya muncul di baris pertama tiap karyawan
                 const cellStrength = index === 0 ? strStrength : '';
                 const cellImprove = index === 0 ? strImprove : '';
 
@@ -179,7 +172,6 @@ function AdminInputContent() {
             });
         });
 
-        // 4. Download Trigger
         const csvContent = "data:text/csv;charset=utf-8," + rows.map(e => e.join(",")).join("\n");
         const encodedUri = encodeURI(csvContent);
         const link = document.createElement("a");
@@ -187,9 +179,11 @@ function AdminInputContent() {
         link.setAttribute("download", `Data_Penilaian_HRIS.csv`);
         document.body.appendChild(link);
         link.click();
+        
+        toast.success("Download berhasil!");
 
       } catch (err: any) {
-          alert("Gagal Export: " + err.message);
+          toast.error("Gagal Export: " + err.message);
       }
       setIsExporting(false);
   };
@@ -197,7 +191,10 @@ function AdminInputContent() {
   // --- LOGIC 2: UPLOAD CSV ---
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
-      if (!file || !selectedCycleId) return alert("Pilih File & Periode dulu!");
+      if (!file || !selectedCycleId) {
+          toast.warning("Pilih File & Periode dulu!");
+          return;
+      }
 
       const reader = new FileReader();
       reader.onload = async (evt) => {
@@ -206,59 +203,65 @@ function AdminInputContent() {
 
           setIsProcessingCsv(true);
 
-          try {
-              const lines = text.split('\n');
-              const bulkData: Record<string, any> = {};
+          const uploadPromise = new Promise(async (resolve, reject) => {
+              try {
+                  const lines = text.split('\n');
+                  const bulkData: Record<string, any> = {};
 
-              // 1. Parsing Data
-              for (let i = 1; i < lines.length; i++) {
-                  const lineText = lines[i].trim();
-                  if (!lineText) continue;
-                  
-                  // Gunakan Smart Parser
-                  const row = parseCSVLine(lineText);
-                  if (row.length < 2) continue; 
-                  
-                  const empName = row[0].trim();
-                  const indCode = row[1].trim();
-                  
-                  const self = parseFloat(row[3]) || 0;
-                  const peer = parseFloat(row[4]) || 0;
-                  const superv = parseFloat(row[5]) || 0;
-                  const subord = parseFloat(row[6]) || 0;
-                  
-                  const strStrength = row[7] ? row[7].trim() : '';
-                  const strImprove = row[8] ? row[8].trim() : '';
+                  for (let i = 1; i < lines.length; i++) {
+                      const lineText = lines[i].trim();
+                      if (!lineText) continue;
+                      
+                      const row = parseCSVLine(lineText);
+                      if (row.length < 2) continue; 
+                      
+                      const empName = row[0].trim();
+                      const indCode = row[1].trim();
+                      
+                      const self = parseFloat(row[3]) || 0;
+                      const peer = parseFloat(row[4]) || 0;
+                      const superv = parseFloat(row[5]) || 0;
+                      const subord = parseFloat(row[6]) || 0;
+                      
+                      const strStrength = row[7] ? row[7].trim() : '';
+                      const strImprove = row[8] ? row[8].trim() : '';
 
-                  const empObj = employees.find(e => e.full_name.trim().toLowerCase() === empName.toLowerCase());
-                  const indObj = indicators.find(ind => ind.code.trim().toLowerCase() === indCode.toLowerCase());
+                      const empObj = employees.find(e => e.full_name.trim().toLowerCase() === empName.toLowerCase());
+                      const indObj = indicators.find(ind => ind.code.trim().toLowerCase() === indCode.toLowerCase());
 
-                  if (empObj && indObj) {
-                      if (!bulkData[empObj.id]) {
-                          bulkData[empObj.id] = { scores: {}, strength: '', improvement: '' };
+                      if (empObj && indObj) {
+                          if (!bulkData[empObj.id]) {
+                              bulkData[empObj.id] = { scores: {}, strength: '', improvement: '' };
+                          }
+                          bulkData[empObj.id].scores[indObj.id] = { self, peer, supervisor: superv, subordinate: subord };
+                          if (strStrength) bulkData[empObj.id].strength = strStrength;
+                          if (strImprove) bulkData[empObj.id].improvement = strImprove;
                       }
-                      bulkData[empObj.id].scores[indObj.id] = { self, peer, supervisor: superv, subordinate: subord };
-                      if (strStrength) bulkData[empObj.id].strength = strStrength;
-                      if (strImprove) bulkData[empObj.id].improvement = strImprove;
                   }
+
+                  const empIds = Object.keys(bulkData);
+                  if (empIds.length === 0) throw new Error("Tidak ada data valid dalam CSV.");
+
+                  const savePromises = empIds.map(empId => {
+                      const data = bulkData[empId];
+                      return calculateAndSave(empId, data.scores, data.strength, data.improvement, true);
+                  });
+
+                  await Promise.all(savePromises);
+                  
+                  resolve(`${empIds.length} karyawan`);
+                  setTimeout(() => window.location.reload(), 2000);
+
+              } catch (err: any) {
+                  reject(err.message);
               }
+          });
 
-              const empIds = Object.keys(bulkData);
-              if (empIds.length === 0) throw new Error("Tidak ada data valid yang ditemukan dalam CSV.");
-
-              // 2. SAVING DATA PARALEL
-              const savePromises = empIds.map(empId => {
-                  const data = bulkData[empId];
-                  return calculateAndSave(empId, data.scores, data.strength, data.improvement, true);
-              });
-
-              await Promise.all(savePromises);
-              alert(`✅ Berhasil update data untuk ${empIds.length} karyawan!`);
-              window.location.reload();
-
-          } catch (err: any) {
-              alert("Gagal Import: " + err.message);
-          }
+          toast.promise(uploadPromise, {
+              loading: 'Mengimpor data CSV...',
+              success: (msg) => `Sukses! Data ${msg} berhasil diupdate.`,
+              error: (err) => `Gagal Import: ${err}`
+          });
           
           setIsProcessingCsv(false);
           e.target.value = '';
@@ -339,13 +342,24 @@ function AdminInputContent() {
 
       const finalInserts = scoreInserts.map(item => ({ ...item, review_id: reviewId }));
       await supabase.from('review_scores').insert(finalInserts);
-
-      if(!silentMode) alert(`✅ Data Tersimpan!`);
   };
 
   const handleManualSave = () => {
       setSaving(true);
-      calculateAndSave(selectedEmpId, scores, summaryStrength, summaryImprovement, false).then(() => setSaving(false));
+      
+      const savePromise = calculateAndSave(selectedEmpId, scores, summaryStrength, summaryImprovement, false);
+      
+      toast.promise(savePromise, {
+          loading: 'Menyimpan penilaian...',
+          success: () => {
+              setSaving(false);
+              return 'Data berhasil disimpan!';
+          },
+          error: (err) => {
+              setSaving(false);
+              return `Gagal simpan: ${err}`;
+          }
+      });
   };
 
   const handleScoreChange = (indicatorId: number, type: string, value: string) => {

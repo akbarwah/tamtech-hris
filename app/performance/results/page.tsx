@@ -1,9 +1,10 @@
 "use client";
 
 import React, { useEffect, useState } from 'react';
-import { supabase } from '../../../lib/supabaseClient'; 
-import { ArrowLeft, Search, FileBarChart, Pencil, ArrowUpDown } from 'lucide-react'; 
+import { supabase } from '@/lib/supabaseClient'; 
+import { ArrowLeft, Search, FileBarChart, Pencil, ArrowUpDown, Loader2, Trash2, Eye } from 'lucide-react'; 
 import Link from 'next/link';
+import { toast } from 'sonner'; // 1. IMPORT TOAST
 
 export default function PerformanceResultsPage() {
   const [reviews, setReviews] = useState<any[]>([]);
@@ -16,15 +17,10 @@ export default function PerformanceResultsPage() {
       direction: 'desc' 
   });
 
-  // 1. LOAD PREFERENCE FROM LOCAL STORAGE
   useEffect(() => {
       const savedSort = localStorage.getItem('performance_sort_config');
       if (savedSort) {
-          try {
-              setSortConfig(JSON.parse(savedSort));
-          } catch (e) {
-              console.error("Gagal baca sort config", e);
-          }
+          try { setSortConfig(JSON.parse(savedSort)); } catch (e) { console.error(e); }
       }
   }, []);
 
@@ -34,28 +30,53 @@ export default function PerformanceResultsPage() {
 
   const fetchReviews = async () => {
     setLoading(true);
-    const { data, error } = await supabase
-      .from('performance_reviews')
-      .select(`
-        id, 
-        cycle_id, 
-        employee_id,
-        final_score_total, 
-        normalized_score,
-        created_at,
-        employee:employees!employee_id(full_name, job_position, department),
-        cycle:performance_cycles!cycle_id(title, status)
-      `)
-      .order('created_at', { ascending: false });
+    try {
+        const { data, error } = await supabase
+          .from('performance_reviews')
+          .select(`
+            id, 
+            cycle_id, 
+            employee_id,
+            final_score_total, 
+            normalized_score,
+            created_at,
+            employee:employees!employee_id(full_name, job_position, department),
+            cycle:performance_cycles!cycle_id(title, status)
+          `)
+          .order('created_at', { ascending: false });
 
-    if (error) console.error(error);
-    setReviews(data || []);
-    setLoading(false);
+        if (error) throw error;
+        setReviews(data || []);
+    } catch (error: any) {
+        toast.error("Gagal memuat data rekapitulasi.");
+    } finally {
+        setLoading(false);
+    }
   };
 
-  // --- LOGIKA WARNA & KATEGORI (DISINKRONKAN) ---
-  
-  // Logic 1: Label Kategori
+  // --- HANDLER DELETE (BARU) ---
+  const handleDelete = async (id: number) => {
+      if(!confirm("Yakin ingin menghapus penilaian ini secara permanen?")) return;
+
+      const deletePromise = new Promise(async (resolve, reject) => {
+          // Hapus header review (Cascade delete akan menghapus scores otomatis jika di-set di DB, 
+          // tapi aman-nya kita biarkan Supabase menangani relasinya)
+          const { error } = await supabase.from('performance_reviews').delete().eq('id', id);
+          if (error) reject(error.message);
+          else {
+              fetchReviews(); // Refresh data
+              resolve("Penilaian dihapus");
+          }
+      });
+
+      toast.promise(deletePromise, {
+          loading: 'Menghapus data...',
+          success: (msg) => `${msg}`,
+          error: (err) => `Gagal hapus: ${err}`
+      });
+  };
+
+  // --- LOGIKA WARNA & KATEGORI ---
   const getCategoryLabel = (score: number) => {
       if (score >= 91) return { label: 'Outstanding', color: 'bg-purple-100 text-purple-700 border-purple-200' };
       if (score >= 76) return { label: 'Exceed Expectation', color: 'bg-emerald-100 text-emerald-700 border-emerald-200' };
@@ -64,33 +85,26 @@ export default function PerformanceResultsPage() {
       return { label: 'Need Improvement', color: 'bg-red-50 text-red-700 border-red-200' };
   };
 
-  // Logic 2: Warna Score (Harus SAMA PERSIS threshold-nya dengan Logic 1)
   const getScoreColor = (score: number) => {
-    if (score >= 91) return 'text-purple-700 bg-purple-50 border-purple-200'; // Outstanding (Ungu)
-    if (score >= 76) return 'text-emerald-700 bg-emerald-50 border-emerald-200'; // Exceed (Hijau)
-    if (score >= 60) return 'text-blue-700 bg-blue-50 border-blue-200'; // Meet (Biru)
-    if (score >= 41) return 'text-amber-700 bg-amber-50 border-amber-200'; // Under (Kuning/Amber)
-    return 'text-red-700 bg-red-50 border-red-200'; // Poor (Merah)
+    if (score >= 91) return 'text-purple-700 bg-purple-50 border-purple-200'; 
+    if (score >= 76) return 'text-emerald-700 bg-emerald-50 border-emerald-200'; 
+    if (score >= 60) return 'text-blue-700 bg-blue-50 border-blue-200'; 
+    if (score >= 41) return 'text-amber-700 bg-amber-50 border-amber-200'; 
+    return 'text-red-700 bg-red-50 border-red-200'; 
   };
 
-  // 2. HANDLE SORT & SAVE TO LOCAL STORAGE
   const handleSort = (key: string) => {
       let direction: 'asc' | 'desc' = 'asc';
-      if (sortConfig.key === key && sortConfig.direction === 'asc') {
-          direction = 'desc';
-      }
-      
+      if (sortConfig.key === key && sortConfig.direction === 'asc') direction = 'desc';
       const newConfig = { key, direction };
       setSortConfig(newConfig);
-      
       localStorage.setItem('performance_sort_config', JSON.stringify(newConfig));
   };
 
-  // 3. APPLY SORTING
   const filteredAndSorted = [...reviews]
     .filter(r => 
-        r.employee?.full_name.toLowerCase().includes(term.toLowerCase()) ||
-        r.cycle?.title.toLowerCase().includes(term.toLowerCase())
+        r.employee?.full_name?.toLowerCase().includes(term.toLowerCase()) ||
+        r.cycle?.title?.toLowerCase().includes(term.toLowerCase())
     )
     .sort((a, b) => {
         if (sortConfig.key === 'name') {
@@ -103,7 +117,6 @@ export default function PerformanceResultsPage() {
                 ? a.normalized_score - b.normalized_score 
                 : b.normalized_score - a.normalized_score;
         }
-        // Default: Date Created
         return sortConfig.direction === 'asc' 
             ? new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
             : new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
@@ -125,82 +138,87 @@ export default function PerformanceResultsPage() {
       </div>
 
       <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
-        <table className="w-full text-left text-sm">
-            <thead className="bg-slate-50 text-slate-500 border-b border-slate-200">
-                <tr>
-                    {/* Header Nama */}
-                    <th className="px-6 py-4 cursor-pointer hover:bg-slate-100 hover:text-indigo-600 transition-colors select-none" onClick={() => handleSort('name')}>
-                        <div className="flex items-center gap-2">
-                            Karyawan 
-                            <ArrowUpDown size={14} className={sortConfig.key === 'name' ? 'text-indigo-600' : 'text-slate-300'}/>
-                        </div>
-                    </th>
-                    
-                    <th className="px-6 py-4">Periode</th>
-                    
-                    {/* Header Score */}
-                    <th className="px-6 py-4 text-center cursor-pointer hover:bg-slate-100 hover:text-indigo-600 transition-colors select-none" onClick={() => handleSort('score')}>
-                        <div className="flex items-center justify-center gap-2">
-                            Final Score 
-                            <ArrowUpDown size={14} className={sortConfig.key === 'score' ? 'text-indigo-600' : 'text-slate-300'}/>
-                        </div>
-                    </th>
+        <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
+                <thead className="bg-slate-50 text-slate-500 border-b border-slate-200">
+                    <tr>
+                        <th className="px-6 py-4 cursor-pointer hover:bg-slate-100 transition-colors select-none" onClick={() => handleSort('name')}>
+                            <div className="flex items-center gap-2">Karyawan <ArrowUpDown size={14} className={sortConfig.key === 'name' ? 'text-indigo-600' : 'text-slate-300'}/></div>
+                        </th>
+                        <th className="px-6 py-4">Periode</th>
+                        <th className="px-6 py-4 text-center cursor-pointer hover:bg-slate-100 transition-colors select-none" onClick={() => handleSort('score')}>
+                            <div className="flex items-center justify-center gap-2">Final Score <ArrowUpDown size={14} className={sortConfig.key === 'score' ? 'text-indigo-600' : 'text-slate-300'}/></div>
+                        </th>
+                        <th className="px-6 py-4 text-center">Category</th>
+                        <th className="px-6 py-4 text-right">Aksi</th>
+                    </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                    {loading ? (
+                        <tr><td colSpan={5} className="p-12 text-center text-slate-400 flex flex-col items-center gap-2"><Loader2 className="animate-spin"/> Loading data...</td></tr>
+                    ) : filteredAndSorted.length === 0 ? (
+                        <tr><td colSpan={5} className="p-12 text-center text-slate-400 italic">Belum ada data penilaian yang ditemukan.</td></tr>
+                    ) : (
+                        filteredAndSorted.map((r) => {
+                            const cat = getCategoryLabel(r.normalized_score);
+                            return (
+                                <tr key={r.id} className="hover:bg-slate-50 transition-colors group">
+                                    <td className="px-6 py-4">
+                                        <div className="font-bold text-slate-900">{r.employee?.full_name}</div>
+                                        <div className="text-xs text-slate-500">{r.employee?.job_position}</div>
+                                    </td>
+                                    <td className="px-6 py-4">
+                                        <span className="px-2 py-1 bg-slate-100 rounded text-xs font-medium text-slate-600 border border-slate-200">{r.cycle?.title}</span>
+                                    </td>
+                                    <td className="px-6 py-4 text-center">
+                                        <span className={`px-3 py-1 rounded-full text-xs font-bold border ${getScoreColor(r.normalized_score)}`}>
+                                            {r.normalized_score}
+                                        </span>
+                                    </td>
+                                    <td className="px-6 py-4 text-center">
+                                        <span className={`px-2 py-1 rounded text-[10px] font-bold uppercase border ${cat.color}`}>
+                                            {cat.label}
+                                        </span>
+                                    </td>
+                                    <td className="px-6 py-4 text-right">
+                                        {/* BUTTONS ALWAYS VISIBLE (No Opacity Class) */}
+                                        <div className="flex items-center justify-end gap-2">
+                                            
+                                            {/* 1. View Report */}
+                                            <Link 
+                                                href={`/performance/report/${r.id}`} 
+                                                className="p-2 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors"
+                                                title="Lihat Rapor"
+                                            >
+                                                <Eye size={16}/>
+                                            </Link>
 
-                    <th className="px-6 py-4 text-center">Category</th>
-                    <th className="px-6 py-4 text-right">Aksi</th>
-                </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-                {loading ? (
-                    <tr><td colSpan={5} className="p-8 text-center text-slate-400">Loading data...</td></tr>
-                ) : filteredAndSorted.length === 0 ? (
-                    <tr><td colSpan={5} className="p-8 text-center text-slate-400">Belum ada data penilaian.</td></tr>
-                ) : (
-                    filteredAndSorted.map((r) => {
-                        const cat = getCategoryLabel(r.normalized_score);
-                        return (
-                            <tr key={r.id} className="hover:bg-slate-50 transition-colors">
-                                <td className="px-6 py-4">
-                                    <div className="font-bold text-slate-900">{r.employee?.full_name}</div>
-                                    <div className="text-xs text-slate-500">{r.employee?.job_position}</div>
-                                </td>
-                                <td className="px-6 py-4">
-                                    <span className="px-2 py-1 bg-slate-100 rounded text-xs font-medium text-slate-600 border border-slate-200">{r.cycle?.title}</span>
-                                </td>
-                                <td className="px-6 py-4 text-center">
-                                    {/* Gunakan getScoreColor yang sudah diperbaiki */}
-                                    <span className={`px-3 py-1 rounded-full text-xs font-bold border ${getScoreColor(r.normalized_score)}`}>
-                                        {r.normalized_score}
-                                    </span>
-                                </td>
-                                <td className="px-6 py-4 text-center">
-                                    <span className={`px-2 py-1 rounded text-[10px] font-bold uppercase border ${cat.color}`}>
-                                        {cat.label}
-                                    </span>
-                                </td>
-                                <td className="px-6 py-4 text-right">
-                                    <div className="flex items-center justify-end gap-2">
-                                        <Link 
-                                            href={`/performance/input?cid=${r.cycle_id}&eid=${r.employee_id}`} 
-                                            className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors border border-transparent hover:border-indigo-100"
-                                            title="Edit Penilaian"
-                                        >
-                                            <Pencil size={16}/>
-                                        </Link>
-                                        <Link 
-                                            href={`/performance/report/${r.id}`} 
-                                            className="inline-flex items-center gap-2 px-3 py-2 bg-slate-50 text-slate-600 hover:bg-indigo-50 hover:text-indigo-600 border border-slate-200 hover:border-indigo-200 rounded-lg text-xs font-bold transition-colors"
-                                        >
-                                            <FileBarChart size={16}/> Rapor
-                                        </Link>
-                                    </div>
-                                </td>
-                            </tr>
-                        );
-                    })
-                )}
-            </tbody>
-        </table>
+                                            {/* 2. Edit Data */}
+                                            <Link 
+                                                href={`/performance/input?cid=${r.cycle_id}&eid=${r.employee_id}`} 
+                                                className="p-2 text-amber-600 bg-amber-50 hover:bg-amber-100 rounded-lg transition-colors"
+                                                title="Edit Nilai"
+                                            >
+                                                <Pencil size={16}/>
+                                            </Link>
+
+                                            {/* 3. Delete Data */}
+                                            <button 
+                                                onClick={() => handleDelete(r.id)}
+                                                className="p-2 text-red-600 bg-red-50 hover:bg-red-100 rounded-lg transition-colors"
+                                                title="Hapus Permanen"
+                                            >
+                                                <Trash2 size={16}/>
+                                            </button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            );
+                        })
+                    )}
+                </tbody>
+            </table>
+        </div>
       </div>
     </div>
   );

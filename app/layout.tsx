@@ -1,30 +1,38 @@
-import type { Metadata } from "next";
-import { Inter } from "next/font/google";
 import "./globals.css";
-import MainLayout from "@/components/MainLayout"; // Pastikan import MainLayout, BUKAN Sidebar
+import { Inter } from "next/font/google"; 
+import Sidebar from "./components/Sidebar";
+import LayoutWrapper from "./components/LayoutWrapper"; 
+
+// 1. IMPORT SONNER (Wajib ada)
+import { Toaster } from "sonner";
 
 const inter = Inter({ subsets: ["latin"] });
 
-export const metadata: Metadata = {
-  title: "Tamtech International HRIS",
-  description: "Internal HR Management System",
+export const metadata = {
+  title: "HRIS System",
+  description: "Internal HR Management",
 };
 
-export default function RootLayout({
-  children,
-}: Readonly<{
-  children: React.ReactNode;
-}>) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
       <body className={`${inter.className} bg-slate-50 text-slate-900`}>
-        {/* PENTING: 
-           Jangan taruh <Sidebar /> di sini.
-           Gunakan <MainLayout> yang akan mengatur kapan Sidebar muncul/hilang.
+        
+        {/* 2. KOMPONEN TOASTER */}
+        {/* - position="top-center": Muncul di tengah atas (sangat terlihat).
+            - richColors: Otomatis warna hijau (sukses) dan merah (gagal).
+            - closeButton: User bisa menutup notifikasi manual jika mau.
         */}
-        <MainLayout>
-          {children}
-        </MainLayout>
+        <Toaster position="top-center" richColors closeButton />
+
+        {/* Sidebar sudah pintar, dia akan hide sendiri kalau di /login */}
+        <Sidebar />
+
+        {/* Wrapper ini yang mengatur Margin Kiri (ml-72 vs ml-0) */}
+        <LayoutWrapper>
+           {children}
+        </LayoutWrapper>
+
       </body>
     </html>
   );

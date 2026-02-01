@@ -1,20 +1,19 @@
 "use client";
 
 import React, { useEffect, useState } from 'react';
-import { createPortal } from 'react-dom'; // IMPORT PENTING UNTUK PORTAL
+import { createPortal } from 'react-dom'; 
 import { supabase } from '@/lib/supabaseClient';
 import { 
   CheckCircle2, Clock, XCircle, Search, Filter, X, History, ArrowUpDown, Loader2 
 } from 'lucide-react';
 import Link from 'next/link';
 
-// --- KOMPONEN PORTAL (SOLUSI POSISI MODAL) ---
+// --- KOMPONEN PORTAL ---
 const ModalPortal = ({ children }: { children: React.ReactNode }) => {
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
     setMounted(true);
-    // Matikan scroll pada body saat modal muncul
     document.body.style.overflow = 'hidden';
     return () => {
       document.body.style.overflow = 'unset';
@@ -23,7 +22,6 @@ const ModalPortal = ({ children }: { children: React.ReactNode }) => {
 
   if (!mounted) return null;
 
-  // "Teleportasi" content ke tag <body>
   return createPortal(
     <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
       {children}
@@ -127,9 +125,8 @@ export default function LeaveBalancesPage() {
   // --- VIEW HISTORY ---
   const openHistory = async (emp: any) => {
       setSelectedEmp(emp);
-      setIsHistoryOpen(true); // Buka modal dulu biar responsif
+      setIsHistoryOpen(true); 
       
-      // Fetch fresh history
       const { data } = await supabase
         .from('time_off')
         .select('*')
@@ -140,9 +137,9 @@ export default function LeaveBalancesPage() {
   };
 
   const getStatusBadge = (status: string) => {
-    if (status === 'Approved') return <span className="text-emerald-600 font-bold text-xs">Approved</span>;
-    if (status === 'Rejected') return <span className="text-red-600 font-bold text-xs">Rejected</span>;
-    return <span className="text-amber-600 font-bold text-xs">Pending</span>;
+    if (status === 'Approved') return <span className="text-emerald-600 font-bold text-xs bg-emerald-50 px-2 py-1 rounded">Approved</span>;
+    if (status === 'Rejected') return <span className="text-red-600 font-bold text-xs bg-red-50 px-2 py-1 rounded">Rejected</span>;
+    return <span className="text-amber-600 font-bold text-xs bg-amber-50 px-2 py-1 rounded">Pending</span>;
   };
 
   return (
@@ -252,13 +249,11 @@ export default function LeaveBalancesPage() {
         )}
       </div>
 
-      {/* --- HISTORY MODAL VIA PORTAL (SOLUSI SCROLLING) --- */}
+      {/* --- HISTORY MODAL VIA PORTAL --- */}
       {isHistoryOpen && selectedEmp && (
           <ModalPortal>
-             {/* Backdrop (Inside Portal) */}
              <div className="absolute inset-0 bg-black/40 backdrop-blur-sm transition-opacity" onClick={() => setIsHistoryOpen(false)} />
              
-             {/* Content (Inside Portal) */}
              <div className="relative w-full max-w-3xl bg-white rounded-2xl shadow-2xl border border-slate-100 animate-enter flex flex-col max-h-[85vh]">
                 <div className="px-6 py-5 border-b border-slate-100 flex justify-between items-start bg-slate-50/50">
                     <div>
@@ -284,7 +279,7 @@ export default function LeaveBalancesPage() {
                     </div>
                 </div>
 
-                <div className="flex-1 overflow-y-auto">
+                <div className="flex-1 overflow-y-auto custom-scrollbar">
                     <table className="w-full text-left text-sm">
                         <thead className="bg-white sticky top-0 z-10 border-b border-slate-100">
                             <tr>
@@ -294,26 +289,25 @@ export default function LeaveBalancesPage() {
                                 <th className="px-6 py-3 font-semibold text-slate-500 text-xs uppercase">Status</th>
                             </tr>
                         </thead>
-<tbody className="divide-y divide-slate-50">
-    {historyLogs.length === 0 && <tr><td colSpan={4} className="p-8 text-center text-slate-400 italic">Tidak ada history.</td></tr>}
-    {historyLogs.map(log => (
-        <tr key={log.id} className="hover:bg-slate-50">
-            {/* UPDATE DI SINI: Menampilkan Range Tanggal */}
-            <td className="px-6 py-3 text-slate-600 text-xs">
-                <div className="font-medium text-slate-700">
-                    {new Date(log.start_date).toLocaleDateString('id-ID')}
-                </div>
-                <div className="text-slate-400 text-[10px] mt-0.5">
-                    s/d {new Date(log.end_date).toLocaleDateString('id-ID')}
-                </div>
-            </td>
-            
-            <td className="px-6 py-3 text-slate-900 font-medium">{log.type}</td>
-            <td className="px-6 py-3 text-slate-600 font-bold">{log.days_taken} Hari</td>
-            <td className="px-6 py-3">{getStatusBadge(log.status)}</td>
-        </tr>
-    ))}
-</tbody>
+                        <tbody className="divide-y divide-slate-50">
+                            {historyLogs.length === 0 && <tr><td colSpan={4} className="p-8 text-center text-slate-400 italic">Tidak ada history.</td></tr>}
+                            {historyLogs.map(log => (
+                                <tr key={log.id} className="hover:bg-slate-50">
+                                    <td className="px-6 py-3 text-slate-600 text-xs">
+                                        <div className="font-medium text-slate-700">
+                                            {new Date(log.start_date).toLocaleDateString('id-ID')}
+                                        </div>
+                                        <div className="text-slate-400 text-[10px] mt-0.5">
+                                            s/d {new Date(log.end_date).toLocaleDateString('id-ID')}
+                                        </div>
+                                    </td>
+                                    
+                                    <td className="px-6 py-3 text-slate-900 font-medium">{log.type}</td>
+                                    <td className="px-6 py-3 text-slate-600 font-bold">{log.days_taken} Hari</td>
+                                    <td className="px-6 py-3">{getStatusBadge(log.status)}</td>
+                                </tr>
+                            ))}
+                        </tbody>
                     </table>
                 </div>
              </div>

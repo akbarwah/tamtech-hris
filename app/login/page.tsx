@@ -1,123 +1,112 @@
 "use client";
 
-import React, { useState } from 'react';
-import { supabase } from "@/lib/supabaseClient";
+import { useState } from 'react';
+import { supabase } from '@/lib/supabaseClient';
 import { useRouter } from 'next/navigation';
-import { Lock, Mail, Loader2, LayoutDashboard } from 'lucide-react';
+import { toast } from 'sonner';
+// 1. Tambahkan Import Image dari Next.js
+import Image from 'next/image'; 
+import { Loader2, Lock, Mail } from 'lucide-react'; // Hapus ShieldCheck karena sudah tidak dipakai
 
 export default function LoginPage() {
   const router = useRouter();
+  const [loading, setLoading] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [errorMsg, setErrorMsg] = useState('');
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    setErrorMsg('');
 
-    try {
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email: email,
-        password: password,
-      });
+    const { error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
 
-      if (error) {
-        throw error;
-      }
-
-      if (data.user) {
-        // Login berhasil, arahkan ke dashboard
-        router.push('/'); // Atau ke halaman utama yang Anda mau
-        router.refresh();
-      }
-    } catch (error: any) {
-      setErrorMsg(error.message || 'Gagal login. Cek email dan password.');
-    } finally {
+    if (error) {
+      toast.error(error.message);
       setLoading(false);
+    } else {
+      toast.success("Welcome back!");
+      router.push('/'); 
+      router.refresh();
     }
   };
 
-return (
-    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
-      <div className="bg-white max-w-md w-full rounded-2xl shadow-xl border border-slate-100 overflow-hidden animate-enter">
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-slate-50 p-4">
+      <div className="w-full max-w-md bg-white rounded-3xl shadow-xl border border-slate-100 overflow-hidden animate-enter">
         
-        {/* Header Logo */}
-        <div className="bg-gradient-to-r from-indigo-600 to-blue-600 p-8 text-center">
-          
-          {/* --- BAGIAN YANG DIUBAH (Ganti Icon jadi Image) --- */}
-          <div className="w-full h-20 flex items-center justify-center mb-2">
-             <img 
-               src="/favicon.ico"  // Menggunakan logo yang sama dengan Sidebar
-               // Jika tetap ingin pakai favicon, ubah jadi: src="/favicon.ico"
-               alt="Company Logo" 
-               className="h-full object-contain drop-shadow-md" 
-               // Note: 'brightness-0 invert' membuat logo jadi putih total (cocok untuk background biru).
-               // Jika logo anda berwarna dan ingin warna aslinya, hapus class 'brightness-0 invert'
-             />
-          </div>
-          {/* -------------------------------------------------- */}
+        {/* Header Visual */}
+        <div className="bg-indigo-600 px-8 py-10 text-center relative overflow-hidden">
+            <div className="absolute top-0 left-0 w-full h-full bg-white/10 opacity-20 transform -skew-y-12 scale-150"></div>
+            <div className="relative z-10 flex flex-col items-center">
+                
+                {/* 2. AREA LOGO PERUSAHAAN */}
+                <div className="bg-white p-3 rounded-2xl mb-4 shadow-lg">
+                    {/* Mengambil file dari public/favicon.ico */}
+                    <Image 
+                        src="/favicon.ico" 
+                        alt="Company Logo" 
+                        width={48} 
+                        height={48} 
+                        className="w-12 h-12 object-contain"
+                    />
+                </div>
 
-          <h1 className="text-2xl font-bold text-white">Tamtech HRIS</h1>
-          <p className="text-indigo-100 text-sm mt-1">Please sign in to continue</p>
+                <h1 className="text-2xl font-bold text-white tracking-tight">Tamtech HRIS Portal</h1>
+                <p className="text-indigo-200 text-sm mt-1">Employee Management System</p>
+            </div>
         </div>
 
-        {/* Form */}
-        <div className="p-8">
-          <form onSubmit={handleLogin} className="space-y-5">
-            {errorMsg && (
-              <div className="p-3 bg-red-50 border border-red-200 text-red-600 text-xs rounded-lg font-medium text-center">
-                {errorMsg}
-              </div>
-            )}
+        {/* Login Form */}
+        <div className="p-8 pt-10">
+            <form onSubmit={handleLogin} className="space-y-5">
+                <div className="space-y-1.5">
+                    <label className="text-xs font-bold text-slate-500 uppercase ml-1">Email Address</label>
+                    <div className="relative">
+                        <Mail size={18} className="absolute left-3.5 top-3.5 text-slate-400"/>
+                        <input 
+                            type="email" 
+                            required
+                            className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all outline-none"
+                            placeholder="admin@company.com"
+                            value={email}
+                            onChange={e => setEmail(e.target.value)}
+                        />
+                    </div>
+                </div>
 
-            <div>
-              <label className="block text-xs font-bold text-slate-600 mb-2 uppercase">Email Address</label>
-              <div className="relative">
-                <Mail size={18} className="absolute left-3 top-2.5 text-slate-400" />
-                <input 
-                  type="email" 
-                  required
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none text-sm transition-all text-slate-800"
-                  placeholder="name@company.com"
-                />
-              </div>
+                <div className="space-y-1.5">
+                    <label className="text-xs font-bold text-slate-500 uppercase ml-1">Password</label>
+                    <div className="relative">
+                        <Lock size={18} className="absolute left-3.5 top-3.5 text-slate-400"/>
+                        <input 
+                            type="password" 
+                            required
+                            className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all outline-none"
+                            placeholder="••••••••"
+                            value={password}
+                            onChange={e => setPassword(e.target.value)}
+                        />
+                    </div>
+                </div>
+
+                <button 
+                    disabled={loading}
+                    className="w-full bg-indigo-600 text-white font-bold py-3.5 rounded-xl hover:bg-indigo-700 shadow-lg shadow-indigo-200 active:scale-[0.98] transition-all flex justify-center items-center gap-2 mt-4"
+                >
+                    {loading ? <Loader2 size={20} className="animate-spin" /> : 'Sign In'}
+                </button>
+            </form>
+
+            <div className="mt-8 text-center">
+                <p className="text-xs text-slate-400">
+                    Lupa password? Hubungi <span className="text-indigo-600 font-bold cursor-pointer hover:underline">IT Support</span>.
+                </p>
             </div>
-
-            <div>
-              <label className="block text-xs font-bold text-slate-600 mb-2 uppercase">Password</label>
-              <div className="relative">
-                <Lock size={18} className="absolute left-3 top-2.5 text-slate-400" />
-                <input 
-                  type="password" 
-                  required
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none text-sm transition-all text-slate-800"
-                  placeholder="••••••••"
-                />
-              </div>
-            </div>
-
-            <button 
-              type="submit" 
-              disabled={loading}
-              className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow-lg shadow-indigo-200 flex items-center justify-center gap-2 transition-all active:scale-95 disabled:opacity-70"
-            >
-              {loading ? <Loader2 size={20} className="animate-spin" /> : 'Sign In'}
-            </button>
-          </form>
-
-          <div className="mt-6 text-center">
-            <p className="text-xs text-slate-400">
-              Forgot password? Contact IT Administrator.
-            </p>
-          </div>
         </div>
       </div>
     </div>
   );
-}
+} 
