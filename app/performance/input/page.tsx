@@ -1,28 +1,14 @@
 "use client";
 
 import React, { useEffect, useState, Suspense } from 'react';
-import { supabase } from '../../../lib/supabaseClient'; 
+import { supabase } from '@/lib/supabaseClient'; 
 import { ArrowLeft, Calculator, Loader2, Save, Download, Upload, FileText } from 'lucide-react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { toast } from 'sonner'; // 1. IMPORT TOAST
+import { toast } from 'sonner'; 
+import Papa from "papaparse"; // Pastikan install: npm install papaparse
 
-// --- HELPER: SMART CSV PARSER (IMPORT) ---
-const parseCSVLine = (text: string) => {
-    const re_valid = /^\s*(?:'[^'\\]*(?:\\[\S\s][^'\\]*)*'|"[^"\\]*(?:\\[\S\s][^"\\]*)*"|[^,'"\s\\]*(?:\s+[^,'"\s\\]+)*)\s*(?:,\s*(?:'[^'\\]*(?:\\[\S\s][^'\\]*)*'|"[^"\\]*(?:\\[\S\s][^"\\]*)*"|[^,'"\s\\]*(?:\s+[^,'"\s\\]+)*)\s*)*$/;
-    const re_value = /(?!\s*$)\s*(?:'([^'\\]*(?:\\[\S\s][^'\\]*)*)'|"([^"\\]*(?:\\[\S\s][^"\\]*)*)"|([^,'"\s\\]*(?:\s+[^,'"\s\\]+)*))\s*(?:,|$)/g;
-    const a = []; 
-    text.replace(re_value, function(m0, m1, m2, m3) {
-        if      (m1 !== undefined) a.push(m1.replace(/\\'/g, "'"));
-        else if (m2 !== undefined) a.push(m2.replace(/\\"/g, '"'));
-        else if (m3 !== undefined) a.push(m3);
-        return '';
-    });
-    if (/,\s*$/.test(text)) a.push('');
-    return a;
-};
-
-// --- HELPER: SAFE CSV STRINGIFIER (EXPORT) ---
+// --- HELPER: SAFE CSV STRINGIFIER ---
 const safeCsv = (value: any) => {
     if (value === null || value === undefined) return '';
     const stringValue = String(value);
@@ -32,7 +18,18 @@ const safeCsv = (value: any) => {
     return stringValue;
 };
 
-// --- KOMPONEN KONTEN UTAMA ---
+// --- HELPER: NUMBER SANITIZER & CLAMPER ---
+// Mencegah angka NaN dan membatasi maksimal 99.99 (agar tidak error numeric overflow)
+const cleanNumber = (val: any) => {
+    let num = parseFloat(val);
+    if (isNaN(num)) return 0;
+    
+    // PENTING: Clamp angka agar tidak tembus 100.00 (Max DB: 99.99)
+    if (num >= 100) num = 99.99;
+    
+    return Number(num.toFixed(2));
+};
+
 function AdminInputContent() {
   const searchParams = useSearchParams();
   const editCycleId = searchParams.get('cid');
@@ -54,10 +51,11 @@ function AdminInputContent() {
   const [isProcessingCsv, setIsProcessingCsv] = useState(false);
   const [isExporting, setIsExporting] = useState(false); 
 
+  // --- 1. INITIAL FETCH ---
   useEffect(() => {
     const init = async () => {
         const { data: cyc } = await supabase.from('performance_cycles').select('*').order('id', { ascending: false });
-        const { data: emp } = await supabase.from('employees').select('id, full_name, job_position').order('full_name');
+        const { data: emp } = await supabase.from('employees').select('id, full_name, job_position').eq('is_active', true).order('full_name');
         const { data: ind } = await supabase.from('performance_indicators').select('*').order('id', { ascending: true });
         
         setCycles(cyc || []);
@@ -68,6 +66,7 @@ function AdminInputContent() {
     init();
   }, []);
 
+  // --- 2. LOAD EXISTING DATA ---
   useEffect(() => {
       const loadExistingReview = async () => {
           if(!selectedCycleId || !selectedEmpId) return;
@@ -94,7 +93,7 @@ function AdminInputContent() {
       loadExistingReview();
   }, [selectedCycleId, selectedEmpId]);
 
-  // --- LOGIC 1: EXPORT CSV WITH DATA (UPDATED) ---
+  // --- 3. EXPORT CSV TEMPLATE ---
   const handleDownloadTemplate = async () => {
       if(!selectedCycleId) {
           toast.warning("Pilih Periode terlebih dahulu!");
@@ -119,12 +118,10 @@ function AdminInputContent() {
         }
 
         const scoreMap: Record<string, any> = {}; 
-        
         if (reviewIds.length > 0) {
             const { data: scores } = await supabase.from('review_scores')
                 .select('review_id, indicator_id, reviewer_type, score')
                 .in('review_id', reviewIds);
-            
             if (scores) {
                 scores.forEach(s => {
                     const key = `${s.review_id}_${s.indicator_id}`;
@@ -143,31 +140,17 @@ function AdminInputContent() {
 
             indicators.forEach((ind, index) => {
                 let self = '', peer = '', superv = '', subord = '';
-
                 if (review) {
                     const key = `${review.id}_${ind.id}`;
                     const s = scoreMap[key];
                     if (s) {
-                        self = s.self || '';
-                        peer = s.peer || '';
-                        superv = s.supervisor || '';
-                        subord = s.subordinate || '';
+                        self = s.self || ''; peer = s.peer || ''; superv = s.supervisor || ''; subord = s.subordinate || '';
                     }
                 }
-
-                const cellStrength = index === 0 ? strStrength : '';
-                const cellImprove = index === 0 ? strImprove : '';
-
                 rows.push([
-                    safeCsv(emp.full_name),
-                    safeCsv(ind.code),
-                    safeCsv(ind.indicator_name),
-                    safeCsv(self),
-                    safeCsv(peer),
-                    safeCsv(superv),
-                    safeCsv(subord),
-                    safeCsv(cellStrength),
-                    safeCsv(cellImprove)
+                    safeCsv(emp.full_name), safeCsv(ind.code), safeCsv(ind.indicator_name),
+                    safeCsv(self), safeCsv(peer), safeCsv(superv), safeCsv(subord),
+                    safeCsv(index === 0 ? strStrength : ''), safeCsv(index === 0 ? strImprove : '')
                 ]);
             });
         });
@@ -179,16 +162,14 @@ function AdminInputContent() {
         link.setAttribute("download", `Data_Penilaian_HRIS.csv`);
         document.body.appendChild(link);
         link.click();
-        
         toast.success("Download berhasil!");
-
       } catch (err: any) {
           toast.error("Gagal Export: " + err.message);
       }
       setIsExporting(false);
   };
 
-  // --- LOGIC 2: UPLOAD CSV ---
+  // --- 4. UPLOAD CSV HANDLER ---
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (!file || !selectedCycleId) {
@@ -196,52 +177,61 @@ function AdminInputContent() {
           return;
       }
 
-      const reader = new FileReader();
-      reader.onload = async (evt) => {
-          const text = evt.target?.result as string;
-          if(!text) return;
+      setIsProcessingCsv(true);
+      toast.info("Menganalisis file CSV...");
 
-          setIsProcessingCsv(true);
+      Papa.parse(file, {
+          header: false,
+          skipEmptyLines: true,
+          complete: async (results) => {
+              const rows = results.data as string[][];
+              const bulkData: Record<string, any> = {};
+              const errors: string[] = [];
 
-          const uploadPromise = new Promise(async (resolve, reject) => {
+              console.log(`[CSV] Total baris: ${rows.length}`);
+
+              for (let i = 1; i < rows.length; i++) {
+                  const row = rows[i];
+                  if (row.length < 2) continue;
+
+                  const empNameCSV = row[0] ? row[0].trim() : '';
+                  const indCodeCSV = row[1] ? row[1].trim() : '';
+                  if(!empNameCSV || !indCodeCSV) continue;
+
+                  const empObj = employees.find(e => e.full_name.trim().toLowerCase() === empNameCSV.toLowerCase());
+                  const indObj = indicators.find(ind => ind.code.trim().toLowerCase() === indCodeCSV.toLowerCase());
+
+                  if (!empObj) { errors.push(`Baris ${i+1}: Karyawan "${empNameCSV}" tidak ditemukan.`); continue; }
+                  if (!indObj) { errors.push(`Baris ${i+1}: Indikator "${indCodeCSV}" tidak ditemukan.`); continue; }
+
+                  // CLEAN NUMBER LANGSUNG DI SINI
+                  const self = cleanNumber(row[3]);
+                  const peer = cleanNumber(row[4]);
+                  const superv = cleanNumber(row[5]);
+                  const subord = cleanNumber(row[6]);
+                  
+                  const strStrength = row[7] ? row[7].trim() : '';
+                  const strImprove = row[8] ? row[8].trim() : '';
+
+                  if (!bulkData[empObj.id]) bulkData[empObj.id] = { scores: {}, strength: '', improvement: '' };
+                  bulkData[empObj.id].scores[indObj.id] = { self, peer, supervisor: superv, subordinate: subord };
+                  if (strStrength) bulkData[empObj.id].strength = strStrength;
+                  if (strImprove) bulkData[empObj.id].improvement = strImprove;
+              }
+
+              if (errors.length > 0) {
+                  console.warn("CSV Warnings:", errors);
+                  toast.warning(`${errors.length} baris data dilewati (cek console).`);
+              }
+
+              const empIds = Object.keys(bulkData);
+              if (empIds.length === 0) {
+                  toast.error("Tidak ada data valid yang bisa diproses.");
+                  setIsProcessingCsv(false);
+                  return;
+              }
+
               try {
-                  const lines = text.split('\n');
-                  const bulkData: Record<string, any> = {};
-
-                  for (let i = 1; i < lines.length; i++) {
-                      const lineText = lines[i].trim();
-                      if (!lineText) continue;
-                      
-                      const row = parseCSVLine(lineText);
-                      if (row.length < 2) continue; 
-                      
-                      const empName = row[0].trim();
-                      const indCode = row[1].trim();
-                      
-                      const self = parseFloat(row[3]) || 0;
-                      const peer = parseFloat(row[4]) || 0;
-                      const superv = parseFloat(row[5]) || 0;
-                      const subord = parseFloat(row[6]) || 0;
-                      
-                      const strStrength = row[7] ? row[7].trim() : '';
-                      const strImprove = row[8] ? row[8].trim() : '';
-
-                      const empObj = employees.find(e => e.full_name.trim().toLowerCase() === empName.toLowerCase());
-                      const indObj = indicators.find(ind => ind.code.trim().toLowerCase() === indCode.toLowerCase());
-
-                      if (empObj && indObj) {
-                          if (!bulkData[empObj.id]) {
-                              bulkData[empObj.id] = { scores: {}, strength: '', improvement: '' };
-                          }
-                          bulkData[empObj.id].scores[indObj.id] = { self, peer, supervisor: superv, subordinate: subord };
-                          if (strStrength) bulkData[empObj.id].strength = strStrength;
-                          if (strImprove) bulkData[empObj.id].improvement = strImprove;
-                      }
-                  }
-
-                  const empIds = Object.keys(bulkData);
-                  if (empIds.length === 0) throw new Error("Tidak ada data valid dalam CSV.");
-
                   const savePromises = empIds.map(empId => {
                       const data = bulkData[empId];
                       return calculateAndSave(empId, data.scores, data.strength, data.improvement, true);
@@ -249,27 +239,25 @@ function AdminInputContent() {
 
                   await Promise.all(savePromises);
                   
-                  resolve(`${empIds.length} karyawan`);
+                  toast.success(`SUKSES! Berhasil memproses ${empIds.length} karyawan.`);
                   setTimeout(() => window.location.reload(), 2000);
 
               } catch (err: any) {
-                  reject(err.message);
+                  console.error("BATCH SAVE ERROR:", err);
+                  toast.error("Gagal Simpan: " + err.message);
+              } finally {
+                  setIsProcessingCsv(false);
+                  e.target.value = '';
               }
-          });
-
-          toast.promise(uploadPromise, {
-              loading: 'Mengimpor data CSV...',
-              success: (msg) => `Sukses! Data ${msg} berhasil diupdate.`,
-              error: (err) => `Gagal Import: ${err}`
-          });
-          
-          setIsProcessingCsv(false);
-          e.target.value = '';
-      };
-      reader.readAsText(file);
+          },
+          error: (err) => {
+              toast.error("CSV Parse Error: " + err.message);
+              setIsProcessingCsv(false);
+          }
+      });
   };
 
-  // --- LOGIC 3: CALCULATE & SAVE ---
+  // --- 5. LOGIC SAVE DATA (FINAL FIX: ANTI-OVERFLOW) ---
   const calculateAndSave = async (employeeId: string, inputScores: any, strStrength: string, strImprove: string, silentMode = false) => {
       if(!selectedCycleId || !employeeId) return;
       
@@ -279,10 +267,12 @@ function AdminInputContent() {
 
       for (const ind of indicators) {
           const s = inputScores[ind.id] || {};
-          const valSelf = parseFloat(s.self) || 0;
-          const valPeer = parseFloat(s.peer) || 0;
-          const valSuper = parseFloat(s.supervisor) || 0;
-          const valSub = parseFloat(s.subordinate) || 0;
+          
+          // CLEAN NUMBER DI SINI JUGA UNTUK AMAN
+          const valSelf = cleanNumber(s.self);
+          const valPeer = cleanNumber(s.peer);
+          const valSuper = cleanNumber(s.supervisor);
+          const valSub = cleanNumber(s.subordinate);
 
           let indicatorFinalScore = 0;
           if (valSub === 0) {
@@ -291,7 +281,7 @@ function AdminInputContent() {
               indicatorFinalScore = (valPeer * 0.30) + (valSuper * 0.60) + (valSub * 0.10);
           }
 
-          if (valSuper > 0 || valPeer > 0) {
+          if (valSuper > 0 || valPeer > 0 || valSelf > 0) {
               totalWeightedSum += indicatorFinalScore;
               indicatorCount++;
           }
@@ -302,8 +292,16 @@ function AdminInputContent() {
           scoreInserts.push({ review_id: null, indicator_id: ind.id, reviewer_type: 'Subordinate', score: valSub });
       }
 
-      const finalScoreTotal = indicatorCount > 0 ? (totalWeightedSum / indicatorCount) : 0;
-      const normalizedScore = finalScoreTotal * 20;
+      // Hitung Final Score
+      let finalScoreTotal = indicatorCount > 0 ? (totalWeightedSum / indicatorCount) : 0;
+      
+      // Hitung Normalized Score
+      let normalizedScore = finalScoreTotal * 20;
+      
+      // --- FINAL SAFEGUARD: CLAMP VALUES ---
+      // Pastikan tidak ada satupun nilai yang menembus 99.99
+      finalScoreTotal = cleanNumber(finalScoreTotal);
+      normalizedScore = cleanNumber(normalizedScore);
 
       let currentStrength = strStrength;
       let currentImprove = strImprove;
@@ -320,9 +318,15 @@ function AdminInputContent() {
            }
       }
 
-      const { data: existing } = await supabase.from('performance_reviews').select('id').eq('cycle_id', selectedCycleId).eq('employee_id', employeeId).single();
+      const { data: existing } = await supabase.from('performance_reviews')
+        .select('id')
+        .eq('cycle_id', selectedCycleId)
+        .eq('employee_id', employeeId)
+        .single();
+      
       let reviewId = existing?.id;
 
+      // HAPUS status/updated_at untuk keamanan maksimal dari error 400
       const headerData = { 
           cycle_id: selectedCycleId, 
           employee_id: employeeId, 
@@ -332,33 +336,36 @@ function AdminInputContent() {
           summary_areas_of_improvement: currentImprove
       };
 
-      if (reviewId) {
-          await supabase.from('performance_reviews').update(headerData).eq('id', reviewId);
-          await supabase.from('review_scores').delete().eq('review_id', reviewId);
-      } else {
-          const { data: newReview } = await supabase.from('performance_reviews').insert([headerData]).select().single();
-          reviewId = newReview.id;
-      }
+      try {
+          if (reviewId) {
+              const { error: errUpdate } = await supabase.from('performance_reviews').update(headerData).eq('id', reviewId);
+              if (errUpdate) throw errUpdate;
+              await supabase.from('review_scores').delete().eq('review_id', reviewId);
+          } else {
+              const { data: newReview, error: errInsert } = await supabase.from('performance_reviews').insert([headerData]).select().single();
+              if (errInsert) throw errInsert;
+              reviewId = newReview.id;
+          }
 
-      const finalInserts = scoreInserts.map(item => ({ ...item, review_id: reviewId }));
-      await supabase.from('review_scores').insert(finalInserts);
+          if(scoreInserts.length > 0) {
+              const finalInserts = scoreInserts.map(item => ({ ...item, review_id: reviewId }));
+              const { error: errScore } = await supabase.from('review_scores').insert(finalInserts);
+              if (errScore) throw errScore;
+          }
+      } catch (error: any) {
+          console.error(`FATAL ERROR saving EmpID ${employeeId}:`, JSON.stringify(error, null, 2));
+          console.error("Payload yang gagal:", headerData);
+          throw new Error(`DB Error (${employeeId}): ${error.message || JSON.stringify(error)}`);
+      }
   };
 
   const handleManualSave = () => {
       setSaving(true);
-      
       const savePromise = calculateAndSave(selectedEmpId, scores, summaryStrength, summaryImprovement, false);
-      
       toast.promise(savePromise, {
           loading: 'Menyimpan penilaian...',
-          success: () => {
-              setSaving(false);
-              return 'Data berhasil disimpan!';
-          },
-          error: (err) => {
-              setSaving(false);
-              return `Gagal simpan: ${err}`;
-          }
+          success: () => { setSaving(false); return 'Data berhasil disimpan!'; },
+          error: (err) => { setSaving(false); return `Gagal simpan: ${err}`; }
       });
   };
 
@@ -378,7 +385,6 @@ function AdminInputContent() {
             <div><h1 className="text-2xl font-bold text-slate-900">Input Penilaian (Admin)</h1><p className="text-slate-500 text-sm">Pilih periode untuk mulai.</p></div>
         </div>
 
-        {/* SELECTOR */}
         <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-4">
             <div>
                 <label className="text-xs font-bold text-slate-500 mb-1">1. Pilih Periode Aktif</label>
@@ -390,22 +396,20 @@ function AdminInputContent() {
             <hr className="border-slate-100"/>
             <div className="space-y-3">
                 <h3 className="font-bold text-slate-700 flex items-center gap-2"><Upload size={18}/> Opsi A: Import Skor & Narasi (CSV)</h3>
-                <p className="text-xs text-slate-500">
-                    Tombol download sekarang akan <strong>mengekspor data terbaru</strong> dari sistem. Silakan edit di Excel lalu upload kembali.
-                </p>
+                <p className="text-xs text-slate-500">Tombol download akan mengekspor data terbaru. Edit di Excel lalu upload.</p>
                 <div className="flex gap-2">
                     <button onClick={handleDownloadTemplate} disabled={!selectedCycleId} className="px-4 py-2 border border-slate-300 rounded-lg text-xs font-bold hover:bg-slate-50 flex items-center gap-2">
                         {isExporting ? <Loader2 size={14} className="animate-spin"/> : <Download size={14}/>} {isExporting ? 'Exporting...' : 'Export Data / Template'}
                     </button>
                     <label className={`px-4 py-2 bg-emerald-600 text-white rounded-lg text-xs font-bold hover:bg-emerald-700 flex items-center gap-2 cursor-pointer ${!selectedCycleId ? 'opacity-50 pointer-events-none' : ''}`}>
-                        {isProcessingCsv ? <Loader2 size={14} className="animate-spin"/> : <Upload size={14}/>} Upload CSV
+                        {isProcessingCsv ? <Loader2 size={14} className="animate-spin"/> : <Upload size={14}/>} Upload CSV (PapaParse)
                         <input type="file" accept=".csv" className="hidden" onChange={handleFileUpload} disabled={isProcessingCsv}/>
                     </label>
                 </div>
             </div>
             <hr className="border-slate-100"/>
             <div className="space-y-3">
-                 <h3 className="font-bold text-slate-700 flex items-center gap-2"><Calculator size={18}/> Opsi B: Input Manual / Edit Narasi</h3>
+                 <h3 className="font-bold text-slate-700 flex items-center gap-2"><Calculator size={18}/> Opsi B: Input Manual</h3>
                  <select className="w-full p-2 border rounded-lg text-sm" value={selectedEmpId} onChange={e => setSelectedEmpId(e.target.value)} disabled={!selectedCycleId}>
                     <option value="">-- Pilih Karyawan Manual --</option>
                     {employees.map(e => <option key={e.id} value={e.id}>{e.full_name}</option>)}
@@ -413,13 +417,11 @@ function AdminInputContent() {
             </div>
         </div>
 
-        {/* FORM MANUAL */}
         {selectedCycleId && selectedEmpId && (
             <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden animate-enter">
                 <div className="p-4 bg-indigo-50 border-b border-indigo-100 flex justify-between items-center">
                     <h3 className="font-bold text-indigo-900">Form: {employees.find(e=>e.id==selectedEmpId)?.full_name}</h3>
                 </div>
-                
                 <div className="grid grid-cols-1 lg:grid-cols-3 divide-y lg:divide-y-0 lg:divide-x divide-slate-200">
                     <div className="lg:col-span-2 p-6">
                         <h4 className="font-bold text-slate-700 mb-4 flex items-center gap-2"><Calculator size={16}/> Input Skor Kuantitatif</h4>
@@ -449,14 +451,13 @@ function AdminInputContent() {
                     <div className="lg:col-span-1 p-6 bg-slate-50/30">
                         <h4 className="font-bold text-slate-700 mb-4 flex items-center gap-2"><FileText size={16}/> Input Narasi (Summary)</h4>
                         <div className="space-y-4">
-                            <div><label className="block text-xs font-bold text-emerald-700 mb-1">Strengths (Kekuatan)</label><textarea className="w-full p-3 border border-emerald-200 rounded-lg text-sm h-32 focus:ring-2 focus:ring-emerald-500 outline-none" placeholder="Paste hasil AI di sini..." value={summaryStrength} onChange={e => setSummaryStrength(e.target.value)} /></div>
-                            <div><label className="block text-xs font-bold text-amber-700 mb-1">Areas of Improvement</label><textarea className="w-full p-3 border border-amber-200 rounded-lg text-sm h-32 focus:ring-2 focus:ring-amber-500 outline-none" placeholder="Paste hasil AI di sini..." value={summaryImprovement} onChange={e => setSummaryImprovement(e.target.value)} /></div>
+                            <div><label className="block text-xs font-bold text-emerald-700 mb-1">Strengths</label><textarea className="w-full p-3 border border-emerald-200 rounded-lg text-sm h-32 focus:ring-2 focus:ring-emerald-500 outline-none" placeholder="Isi kekuatan..." value={summaryStrength} onChange={e => setSummaryStrength(e.target.value)} /></div>
+                            <div><label className="block text-xs font-bold text-amber-700 mb-1">Improvements</label><textarea className="w-full p-3 border border-amber-200 rounded-lg text-sm h-32 focus:ring-2 focus:ring-amber-500 outline-none" placeholder="Isi area perbaikan..." value={summaryImprovement} onChange={e => setSummaryImprovement(e.target.value)} /></div>
                         </div>
                     </div>
                 </div>
-
                 <div className="p-6 border-t bg-slate-50 flex justify-end">
-                    <button onClick={handleManualSave} disabled={saving} className="px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow-md flex items-center gap-2">{saving ? <Loader2 size={20} className="animate-spin"/> : <Save size={20}/>} Simpan Semua Data</button>
+                    <button onClick={handleManualSave} disabled={saving} className="px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow-md flex items-center gap-2">{saving ? <Loader2 size={20} className="animate-spin"/> : <Save size={20}/>} Simpan Data</button>
                 </div>
             </div>
         )}

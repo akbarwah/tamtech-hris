@@ -4,14 +4,13 @@ import React, { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient'; 
 import { ArrowLeft, Search, FileBarChart, Pencil, ArrowUpDown, Loader2, Trash2, Eye } from 'lucide-react'; 
 import Link from 'next/link';
-import { toast } from 'sonner'; // 1. IMPORT TOAST
+import { toast } from 'sonner'; 
 
 export default function PerformanceResultsPage() {
   const [reviews, setReviews] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [term, setTerm] = useState('');
   
-  // State Sorting (Default: Created Date Desc)
   const [sortConfig, setSortConfig] = useState<{ key: string, direction: 'asc' | 'desc' }>({ 
       key: 'date', 
       direction: 'desc' 
@@ -31,6 +30,10 @@ export default function PerformanceResultsPage() {
   const fetchReviews = async () => {
     setLoading(true);
     try {
+        // --- PERBAIKAN UTAMA DI SINI ---
+        // Menghapus tanda seru (!) pada relasi employees dan cycle.
+        // Mengubah dari INNER JOIN menjadi LEFT JOIN.
+        // Artinya: Tampilkan Review walau data Employee tidak terbaca.
         const { data, error } = await supabase
           .from('performance_reviews')
           .select(`
@@ -40,31 +43,31 @@ export default function PerformanceResultsPage() {
             final_score_total, 
             normalized_score,
             created_at,
-            employee:employees!employee_id(full_name, job_position, department),
-            cycle:performance_cycles!cycle_id(title, status)
+            employee:employees(full_name, job_position, department), 
+            cycle:performance_cycles(title, status)
           `)
           .order('created_at', { ascending: false });
 
         if (error) throw error;
+        
+        console.log("Data loaded:", data?.length); // Cek console apakah 66?
         setReviews(data || []);
     } catch (error: any) {
+        console.error("Fetch Error:", error);
         toast.error("Gagal memuat data rekapitulasi.");
     } finally {
         setLoading(false);
     }
   };
 
-  // --- HANDLER DELETE (BARU) ---
   const handleDelete = async (id: number) => {
       if(!confirm("Yakin ingin menghapus penilaian ini secara permanen?")) return;
 
       const deletePromise = new Promise(async (resolve, reject) => {
-          // Hapus header review (Cascade delete akan menghapus scores otomatis jika di-set di DB, 
-          // tapi aman-nya kita biarkan Supabase menangani relasinya)
           const { error } = await supabase.from('performance_reviews').delete().eq('id', id);
           if (error) reject(error.message);
           else {
-              fetchReviews(); // Refresh data
+              fetchReviews(); 
               resolve("Penilaian dihapus");
           }
       });
@@ -76,7 +79,6 @@ export default function PerformanceResultsPage() {
       });
   };
 
-  // --- LOGIKA WARNA & KATEGORI ---
   const getCategoryLabel = (score: number) => {
       if (score >= 91) return { label: 'Outstanding', color: 'bg-purple-100 text-purple-700 border-purple-200' };
       if (score >= 76) return { label: 'Exceed Expectation', color: 'bg-emerald-100 text-emerald-700 border-emerald-200' };
@@ -103,8 +105,8 @@ export default function PerformanceResultsPage() {
 
   const filteredAndSorted = [...reviews]
     .filter(r => 
-        r.employee?.full_name?.toLowerCase().includes(term.toLowerCase()) ||
-        r.cycle?.title?.toLowerCase().includes(term.toLowerCase())
+        (r.employee?.full_name || 'Unknown Employee').toLowerCase().includes(term.toLowerCase()) ||
+        (r.cycle?.title || '').toLowerCase().includes(term.toLowerCase())
     )
     .sort((a, b) => {
         if (sortConfig.key === 'name') {
@@ -161,14 +163,18 @@ export default function PerformanceResultsPage() {
                     ) : (
                         filteredAndSorted.map((r) => {
                             const cat = getCategoryLabel(r.normalized_score);
+                            // Fallback jika employee data null karena RLS
+                            const empName = r.employee?.full_name || 'Unknown (Check RLS)';
+                            const empJob = r.employee?.job_position || '-';
+
                             return (
                                 <tr key={r.id} className="hover:bg-slate-50 transition-colors group">
                                     <td className="px-6 py-4">
-                                        <div className="font-bold text-slate-900">{r.employee?.full_name}</div>
-                                        <div className="text-xs text-slate-500">{r.employee?.job_position}</div>
+                                        <div className="font-bold text-slate-900">{empName}</div>
+                                        <div className="text-xs text-slate-500">{empJob}</div>
                                     </td>
                                     <td className="px-6 py-4">
-                                        <span className="px-2 py-1 bg-slate-100 rounded text-xs font-medium text-slate-600 border border-slate-200">{r.cycle?.title}</span>
+                                        <span className="px-2 py-1 bg-slate-100 rounded text-xs font-medium text-slate-600 border border-slate-200">{r.cycle?.title || 'Unknown Cycle'}</span>
                                     </td>
                                     <td className="px-6 py-4 text-center">
                                         <span className={`px-3 py-1 rounded-full text-xs font-bold border ${getScoreColor(r.normalized_score)}`}>
@@ -181,10 +187,7 @@ export default function PerformanceResultsPage() {
                                         </span>
                                     </td>
                                     <td className="px-6 py-4 text-right">
-                                        {/* BUTTONS ALWAYS VISIBLE (No Opacity Class) */}
                                         <div className="flex items-center justify-end gap-2">
-                                            
-                                            {/* 1. View Report */}
                                             <Link 
                                                 href={`/performance/report/${r.id}`} 
                                                 className="p-2 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors"
@@ -192,8 +195,6 @@ export default function PerformanceResultsPage() {
                                             >
                                                 <Eye size={16}/>
                                             </Link>
-
-                                            {/* 2. Edit Data */}
                                             <Link 
                                                 href={`/performance/input?cid=${r.cycle_id}&eid=${r.employee_id}`} 
                                                 className="p-2 text-amber-600 bg-amber-50 hover:bg-amber-100 rounded-lg transition-colors"
@@ -201,8 +202,6 @@ export default function PerformanceResultsPage() {
                                             >
                                                 <Pencil size={16}/>
                                             </Link>
-
-                                            {/* 3. Delete Data */}
                                             <button 
                                                 onClick={() => handleDelete(r.id)}
                                                 className="p-2 text-red-600 bg-red-50 hover:bg-red-100 rounded-lg transition-colors"
