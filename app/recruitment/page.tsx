@@ -52,22 +52,27 @@ export default function RecruitmentPage() {
 
   useEffect(() => { fetchData(); }, []);
 
-  // --- HANDLER DELETE JOB (WITH TOAST) ---
+// --- HANDLER DELETE JOB (OPTIMIZED WITH TOAST) ---
   const handleDeleteJob = async (id: number) => {
       if(!confirm(`Hapus lowongan kerja ini?`)) return; 
       
+      // 1. OPTIMISTIC UPDATE: Langsung hapus dari layar seketika biar user nggak nunggu loading
+      setJobs(prevJobs => prevJobs.filter(job => job.id !== id));
+
       const deletePromise = new Promise(async (resolve, reject) => {
           const { error } = await supabase.from('job_openings').delete().eq('id', id);
-          if (error) reject(error.message);
-          else resolve("Deleted");
+          if (error) {
+              // 2. Kalau database ternyata gagal/error, KEMBALIKAN datanya ke layar
+              fetchData(); 
+              reject(error.message);
+          } else {
+              resolve("Deleted");
+          }
       });
 
       toast.promise(deletePromise, {
           loading: 'Menghapus data...',
-          success: () => {
-              fetchData();
-              return 'Lowongan berhasil dihapus';
-          },
+          success: 'Lowongan berhasil dihapus',
           error: (err) => `Gagal hapus: ${err}`
       });
   };
