@@ -10,12 +10,12 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 
-// --- CONFIG ---
+// --- CONFIG (Kembalikan ini agar baris 258 tidak error) ---
 const WA_TEMPLATES = [
-  { label: "Undangan HR Interview", text: "Selamat Pagi Sdr {name},\n\nTerima kasih atas lamaran Anda. Kami mengundang Anda untuk sesi Interview HR..." },
-  { label: "Undangan User Interview", text: "Halo Sdr {name},\n\nSelamat! Anda lolos ke tahap selanjutnya yaitu Interview User..." },
-  { label: "Offering Letter", text: "Selamat Siang Sdr {name},\n\nKabar baik! Kami ingin memberikan penawaran kerja..." },
-  { label: "Rejection", text: "Halo Sdr {name},\n\nTerima kasih telah meluangkan waktu. Namun saat ini..." }
+  { label: "Undangan HR Interview", text: "Selamat Pagi Sdr {name},\n\nTerima kasih atas lamaran Anda..." },
+  { label: "Undangan User Interview", text: "Halo Sdr {name},\n\nSelamat! Anda lolos..." },
+  { label: "Offering Letter", text: "Selamat Siang Sdr {name},\n\nKabar baik!..." },
+  { label: "Rejection", text: "Halo Sdr {name},\n\nTerima kasih telah meluangkan waktu..." }
 ];
 
 interface PipelineProps {
@@ -131,17 +131,21 @@ export default function RecruitmentPipeline({ candidates, stages, onEditCandidat
   );
 }
 
-// --- KOMPONEN MODAL FORM (DUPLICATED FROM DATABASE TO MAKE IT WORK) ---
+// --- KOMPONEN MODAL FORM (FINAL DENGAN SUPABASE TEMPLATE & LAPTOP) ---
 function CandidateFormModal({ isOpen, onClose, initialData, onSuccess }: any) {
     const [mounted, setMounted] = useState(false);
     const [saving, setSaving] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
+    
+    // State Baru untuk nyimpen Template dari Database
+    const [waTemplates, setWaTemplates] = useState<any[]>([]);
 
     // Initial State
     const [formData, setFormData] = useState({
         full_name: '', email: '', phone: '', position: '', status: 'Applied', notes: '',
         resume_link: '', current_salary: '', expected_salary: '', notice_period: '', 
-        domicile: '', willingness_onsite: '', test_result: ''        
+        domicile: '', willingness_onsite: '', test_result: '',
+        laptop_availability: '' // <-- Field Laptop
     });
 
     useEffect(() => { setMounted(true); return () => setMounted(false); }, []);
@@ -153,7 +157,7 @@ function CandidateFormModal({ isOpen, onClose, initialData, onSuccess }: any) {
         return () => { document.body.style.overflow = 'unset'; };
     }, [isOpen]);
 
-    // Load Data
+    // Load Data Kandidat
     useEffect(() => {
         if (initialData) {
             setFormData({
@@ -169,10 +173,23 @@ function CandidateFormModal({ isOpen, onClose, initialData, onSuccess }: any) {
                 notice_period: initialData.notice_period || '', 
                 domicile: initialData.domicile || '', 
                 willingness_onsite: initialData.willingness_onsite || '', 
-                test_result: initialData.test_result || ''
+                test_result: initialData.test_result || '',
+                laptop_availability: initialData.laptop_availability || ''
             });
         }
     }, [initialData, isOpen]);
+
+    // --- FETCH TEMPLATE DARI SUPABASE ---
+    useEffect(() => {
+        const fetchTemplates = async () => {
+            if (!isOpen) return; // Hanya fetch kalau modal dibuka
+            const { data, error } = await supabase.from('message_templates').select('*').order('id', { ascending: true });
+            if (data && !error) {
+                setWaTemplates(data);
+            }
+        };
+        fetchTemplates();
+    }, [isOpen]);
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => setFormData({ ...formData, [e.target.name]: e.target.value });
 
@@ -224,7 +241,14 @@ function CandidateFormModal({ isOpen, onClose, initialData, onSuccess }: any) {
         let p = formData.phone.replace(/\D/g, ''); 
         if (p.startsWith('0')) p='62'+p.substring(1); 
         if(!p) { toast.error("Nomor HP tidak valid"); return; }
-        window.open(`https://api.whatsapp.com/send?phone=${p}&text=${encodeURIComponent(txt.replace('{name}',formData.full_name).replace('{position}',formData.position).replace('{email}',formData.email))}`, '_blank'); 
+        
+        // Replace {name}, {position}, {email} dengan data kandidat yang sedang dibuka
+        const finalMessage = txt
+            .replace(/{name}/g, formData.full_name)
+            .replace(/{position}/g, formData.position)
+            .replace(/{email}/g, formData.email);
+
+        window.open(`https://api.whatsapp.com/send?phone=${p}&text=${encodeURIComponent(finalMessage)}`, '_blank'); 
     };
 
     if (!mounted || !isOpen) return null;
@@ -261,18 +285,30 @@ function CandidateFormModal({ isOpen, onClose, initialData, onSuccess }: any) {
                         <div className="bg-emerald-50/50 p-5 rounded-xl border border-emerald-100 space-y-3">
                             <h3 className="text-xs font-bold text-emerald-700 uppercase tracking-wider flex items-center gap-2"><MessageCircle size={14}/> Quick Actions: WhatsApp</h3>
                             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-                                {WA_TEMPLATES.map((template, idx) => (
-                                    <button key={idx} type="button" onClick={() => sendWhatsApp(template.text)} className="flex items-center justify-between px-4 py-2.5 bg-white border border-emerald-200 hover:border-emerald-400 hover:bg-emerald-50 text-emerald-800 rounded-lg text-xs font-medium transition-all shadow-sm group">
-                                        {template.label} <Send size={12} className="text-emerald-400 group-hover:text-emerald-600 group-hover:translate-x-1 transition-transform"/>
-                                    </button>
-                                ))}
+                                {waTemplates.length > 0 ? (
+                                    waTemplates.map((template) => (
+                                        <button 
+                                            key={template.id} 
+                                            type="button" 
+                                            onClick={() => sendWhatsApp(template.text_content)} 
+                                            className="flex items-center justify-between px-4 py-2.5 bg-white border border-emerald-200 hover:border-emerald-400 hover:bg-emerald-50 text-emerald-800 rounded-lg text-xs font-medium transition-all shadow-sm group"
+                                            title="Kirim pesan via WhatsApp"
+                                        >
+                                            {template.label} <Send size={12} className="text-emerald-400 group-hover:text-emerald-600 group-hover:translate-x-1 transition-transform"/>
+                                        </button>
+                                    ))
+                                ) : (
+                                    <div className="text-xs text-emerald-600 italic flex items-center gap-2">
+                                        <Loader2 size={14} className="animate-spin" /> Memuat template...
+                                    </div>
+                                )}
                             </div>
                         </div>
 
                         {/* 3. ASSESSMENT & LOGISTICS */}
                         <div className="bg-slate-50 p-5 rounded-xl border border-slate-200 space-y-4">
                             <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-2"><CheckCircle2 size={14}/> Assessment & Logistics</h3>
-                            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                            <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
                                 <div className="col-span-1">
                                     <label className="block text-xs font-semibold text-slate-700 mb-1">Big Five Code</label>
                                     <div className="relative flex items-center">
@@ -290,10 +326,23 @@ function CandidateFormModal({ isOpen, onClose, initialData, onSuccess }: any) {
                                     <div className="relative"><MapPin size={14} className="absolute left-3 top-2.5 text-red-500"/><input name="domicile" value={formData.domicile} onChange={handleChange} className="w-full pl-9 pr-3 py-2 bg-white border border-slate-200 rounded-lg text-sm" placeholder="City" /></div>
                                 </div>
                                 <div className="col-span-1">
-                                    <label className="block text-xs font-semibold text-slate-700 mb-1">Resume / CV Link</label>
+                                    <label className="block text-xs font-semibold text-slate-700 mb-1">Resume / CV</label>
                                     <div className="relative">
                                         <input name="resume_link" value={formData.resume_link} onChange={handleChange} type="text" placeholder="https://..." className="w-full pl-3 pr-8 py-2 bg-white border border-slate-200 rounded-lg text-sm text-blue-600" />
                                         {formData.resume_link && <a href={formData.resume_link} target="_blank" rel="noreferrer" className="absolute right-2 top-1.5 text-xs bg-blue-50 text-blue-600 px-2 py-1 rounded hover:bg-blue-100 flex items-center gap-1"><ExternalLink size={12} /></a>}
+                                    </div>
+                                </div>
+                                {/* --- INPUT LAPTOP --- */}
+                                <div className="col-span-1">
+                                    <label className="block text-xs font-semibold text-slate-700 mb-1">Punya Laptop?</label>
+                                    <div className="relative">
+                                        <input 
+                                            name="laptop_availability" 
+                                            value={formData.laptop_availability} 
+                                            onChange={handleChange} 
+                                            className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm" 
+                                            placeholder="Ya/Tidak" 
+                                        />
                                     </div>
                                 </div>
                             </div>

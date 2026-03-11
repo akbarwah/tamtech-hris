@@ -84,19 +84,26 @@ export default function HistoryPage() {
       setStats({ totalActive: active, expiring30: exp30, expiring60: exp60 });
   };
 
-  // --- CRUD HANDLERS (REFINED WITH TOAST) ---
+// --- CRUD HANDLERS (REFINED & BULLETPROOF) ---
   const handleSave = async (data: any) => {
       setIsSaving(true);
 
-      // Wrap logic dalam Promise agar bisa ditrack oleh toast.promise
       const savePromise = new Promise(async (resolve, reject) => {
           try {
-              // Helper: Sanitizer
+              // Helper: Sanitizer (DIPERBAIKI UNTUK ANGKA & NULL)
               const sanitizePayload = (source: any) => {
                   const payload = { ...source };
                   delete payload.employees;      
                   delete payload.employee_name;  
                   delete payload.created_at;     
+                  
+                  // Cegah error: invalid input syntax for type numeric ""
+                  if (payload.base_salary === "") payload.base_salary = null;
+                  else if (payload.base_salary) payload.base_salary = Number(payload.base_salary);
+
+                  if (payload.fixed_allowance === "") payload.fixed_allowance = null;
+                  else if (payload.fixed_allowance) payload.fixed_allowance = Number(payload.fixed_allowance);
+
                   return payload;
               };
 
@@ -116,12 +123,17 @@ export default function HistoryPage() {
                      if (error) throw error;
                   }
 
-                  // Sync to Employee Profile
-                  await supabase.from('employees').update({
-                      employment_status: payload.contract_type === 'Permanent' ? 'Permanent' : 'Contract',
-                      contract_end_date: payload.end_date || null,
-                  }).eq('id', payload.employee_id);
+// SYNC TO EMPLOYEE PROFILE (DIPERBAIKI LAGI)
+                  // PENTING: Hanya update profil kalau kontraknya "Active"
+                  if (payload.status === 'Active') {
+                      const { error: syncError } = await supabase.from('employees').update({
+                          employment_status: payload.contract_type === 'Permanent' ? 'Permanent' : 'Contract',
+                          contract_end_date: payload.end_date || null,
+                      }).eq('id', payload.employee_id);
 
+                      // Kalau sinkronisasi profil gagal, lemparkan error agar muncul di notif merah
+                      if (syncError) throw new Error("Kontrak tersimpan, tapi gagal sinkron ke profil: " + syncError.message);
+                  }
               } else {
                   // CAREER HISTORY
                   const payload = sanitizePayload(data);
@@ -139,11 +151,13 @@ export default function HistoryPage() {
                      if (error) throw error;
                   }
 
-                  // Sync to Employee Profile
-                  await supabase.from('employees').update({
+                  // SYNC TO EMPLOYEE PROFILE (DIPERBAIKI)
+                  const { error: syncError } = await supabase.from('employees').update({
                       job_position: payload.new_position,
                       department: payload.new_dept
                   }).eq('id', payload.employee_id);
+                  
+                  if (syncError) throw new Error("Karir tersimpan, tapi gagal sinkron profil: " + syncError.message);
               }
 
               resolve("Success");
@@ -155,16 +169,16 @@ export default function HistoryPage() {
 
       // EKSEKUSI TOAST
       toast.promise(savePromise, {
-          loading: 'Menyimpan data...',
+          loading: 'Menyimpan & Menyinkronkan data...',
           success: () => {
               setIsModalOpen(false);
               fetchData();
               setIsSaving(false);
-              return 'Data berhasil disimpan!';
+              return 'Data & Profil berhasil diupdate!';
           },
           error: (err) => {
               setIsSaving(false);
-              return `Gagal menyimpan: ${err}`;
+              return `Gagal: ${err}`;
           }
       });
   };

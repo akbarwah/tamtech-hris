@@ -313,8 +313,7 @@ export default function PerformanceSettingsPage() {
                                 </tr>
                             ))}
                         </tbody>
-                    </table>}
-                </div>
+                    </table>}                </div>
             </div>
         )}
     </div>

@@ -453,16 +453,23 @@ function AddEmployeeModal({ isOpen, onClose, onSuccess }: any) {
         }
         setIsAdding(true);
 
-        const promise = new Promise(async (resolve, reject) => {
-            const { error } = await supabase.from('employees').insert([{
-                full_name: newEmployee.full_name,
-                email: newEmployee.email,
-                nik: newEmployee.nik || null,
-                is_active: true,
-                employment_status: 'Contract',
-                join_date: new Date().toISOString().split('T')[0]
-            }]);
-            
+const promise = new Promise(async (resolve, reject) => {
+    const { error } = await supabase.from('employees').insert([{
+        full_name: newEmployee.full_name,
+        email: newEmployee.email,
+        nik: newEmployee.nik || null,
+        
+        // --- TAMBAHKAN DUA BARIS INI AGAR LOLOS DATABASE ---
+        job_position: 'TBD', // Atau bisa diisi 'New Hire'
+        department: '-',     // Atau bisa diisi 'Unassigned'
+        // ---------------------------------------------------
+        
+        is_active: true,
+        employment_status: 'Contract',
+        join_date: new Date().toISOString().split('T')[0]
+    }]);
+    
+    // ... sisanya sama            
             if (error) reject(error.message);
             else {
                 onSuccess(); // Refresh data
